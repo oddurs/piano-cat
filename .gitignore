@@ -27,3 +27,10 @@ next-env.d.ts
 npm-debug.log*
 yarn-error.log*
 .npm
+
+# test build output
+.test-build/
+
+# hand tracker, provisioned at build time by scripts/fetch-mediapipe.mjs.
+# 30 MB of wasm and model weights that git has no reason to carry.
+/public/mediapipe/

@@ -29,11 +29,13 @@
   },
   "scripts": {
     "prepare": "git config core.hooksPath .githooks || true",
+    "predev": "node scripts/fetch-mediapipe.mjs",
     "dev": "next dev -p 9393",
+    "prebuild": "node scripts/fetch-mediapipe.mjs",
     "build": "next build",
     "preview": "npx --yes serve out -l 9393",
     "typecheck": "tsc --noEmit",
-    "test": "node tools/sim.mjs",
+    "test": "rm -rf .test-build && tsc -p tsconfig.test.json && node --test \".test-build/tests/*.test.js\"",
     "shot": "node tools/shot.mjs"
   },
   "dependencies": {
