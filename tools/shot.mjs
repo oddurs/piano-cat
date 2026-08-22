@@ -45,21 +45,46 @@ function fakeCam(t, dyn) {
   return { pixels: px, motionMask: mask }
 }
 
-function play(idx, seconds, dyn, mood, vibe, hint) {
+/** a pair of hands going through the motions, for the tracked screens */
+function fakeHands(t, dyn, tracked, height) {
+  const at = (side, phase) => ({
+    side, present: tracked, conf: 1,
+    x: (side === 'L' ? 0.31 : 0.69) + Math.sin(t * 1.7 + phase) * 0.06,
+    y: 1 - height + Math.sin(t * 3 + phase) * 0.06,
+    vy: 0, speed: dyn * 2, spread: 0.4 + dyn * 0.4, lastStroke: 0,
+  })
+  return { L: at('L', 0), R: at('R', 1.6) }
+}
+
+/** an instrument that makes no noise, so the renderer can be driven headlessly */
+const mute = { play() {}, thud() {}, stir() {}, setPedal() {}, setResonance() {} }
+
+function play(idx, seconds, o) {
+  const { dyn, mood, vibe, hint = '', tracked = false, height = 0.5, debug = null } = o
   const piece = PIECES[idx]
-  const con = new Conductor(piece, { play: () => {} })
+  const con = new Conductor(piece, mute)
   const cv = createCanvas(W, H)
   const ren = new R.Renderer(cv)
-  const ex = { dyn, wild: .15, bass: .5, treble: .5, height: .5 }
   const DT = 1 / 60, per = 60 / piece.pulseBpm
   let T = 0, si = 0
+  let frame
   while (T < seconds) {
-    if (mood !== 'sleep') while (si * per <= T) { con.strike(T, .7, si % 2 ? 1 : -1); si++ }
+    if (mood !== 'sleep') while (si * per <= T) { con.strike(T, .7, si % 2 ? 'R' : 'L'); si++ }
+    const hands = fakeHands(T, dyn, tracked, height)
+    const ex = {
+      dyn, wild: .15, height, spread: .5, travel: dyn * .6,
+      present: { L: hands.L.present, R: hands.R.present },
+      x: { L: hands.L.x, R: hands.R.x },
+      twoHanded: tracked,
+    }
     con.update(DT, T, ex)
-    const frame = { energy: .05 * dyn, left: .02 * dyn, right: .035 * dyn, height: .55, down: .6,
-      onset: false, strength: .6, dyn, wild: .15, ...fakeCam(T, dyn) }
-    for (const n of con.lastFired) ren.noteFired(n.p, n.vel, piece.accent)
-    ren.draw(con, frame, DT, mood, { auto: false, vibe, hint })
+    frame = {
+      t: T, hands, strokes: [], tracked,
+      energy: .05 * dyn, dyn, wild: .15, height, spread: .5, travel: dyn * .6,
+      ...fakeCam(T, dyn),
+    }
+    for (const n of con.drain()) ren.noteFired(n.p, n.vel, piece.accent, n.kind === 'ornament')
+    ren.draw(con, frame, DT, mood, { auto: false, vibe, hint, debug })
     T += DT
   }
   return cv
@@ -87,14 +112,31 @@ function sheet(name, cvs) {
 }
 
 sheet('play', [
-  play(0, 6.2, .55, 'happy', 'TASTEFUL', ''),
-  play(1, 9.5, .92, 'wild', 'CHAOS', ''),
-  play(2, 22, .28, 'calm', 'MAESTRO', ''),
-  play(3, 3.0, .04, 'sleep', 'ZZZ', 'the cat is waiting'),
+  play(0, 6.2, { dyn: .55, mood: 'happy', vibe: 'TASTEFUL', tracked: true, height: .35 }),
+  play(1, 9.5, { dyn: .92, mood: 'wild', vibe: 'CHAOS', tracked: true, height: .85 }),
+  play(2, 22, { dyn: .28, mood: 'calm', vibe: 'MAESTRO' }),
+  play(3, 3.0, { dyn: .04, mood: 'sleep', vibe: 'ZZZ', hint: 'the cat is waiting' }),
+])
+sheet('tracking', [
+  // hands low: dampers down, both staves engaged
+  play(0, 5.0, { dyn: .5, mood: 'calm', vibe: 'TASTEFUL', tracked: true, height: .1 }),
+  // hands high: dampers lifted, the pedal meter open
+  play(0, 5.0, { dyn: .5, mood: 'happy', vibe: 'TASTEFUL', tracked: true, height: .95 }),
+  // the debug meters, which are easy to let drift over the playfield
+  play(2, 6.0, {
+    dyn: .6, mood: 'happy', vibe: 'MAESTRO', tracked: true, height: .6,
+    debug: { fps: 58, p50: 21, p95: 34, mode: 'HANDS' },
+  }),
+  // no hands seen at all: the fallback look, with the prompt showing
+  play(1, 4.0, { dyn: .35, mood: 'calm', vibe: 'SPIRITED', hint: 'SHOW ME YOUR HANDS' }),
 ])
 sheet('menu', [
   screen((px) => M.drawMenu(px, { pieces: PIECES, sel: 0, t: 1.2, camWarn: null })),
   screen((px) => M.drawMenu(px, { pieces: PIECES, sel: 2, t: 3.4, camWarn: null })),
   screen((px) => M.drawLoading(px, { t: 2.1, status: 'warming up the piano...', done: .45 })),
   screen((px) => M.drawMenu(px, { pieces: PIECES, sel: 3, t: 5.0, camWarn: 'NO CAMERA - USE SPACE' })),
+  screen((px) => M.drawCalibrate(px, {
+    t: 1.4, left: .45, accent: PIECES[0].accent,
+    hands: [{ x: .3, y: .3 }, { x: .72, y: .62 }],
+  })),
 ])

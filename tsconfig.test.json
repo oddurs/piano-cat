@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "noEmit": false,
+    "incremental": false,
+    "outDir": ".test-build",
+    "types": ["node"],
+    "plugins": []
+  },
+  "include": ["lib/**/*.ts", "tests/**/*.ts"],
+  "exclude": ["node_modules", "app", "lib/camera.ts", "lib/render.ts", "lib/menu.ts", "lib/cat.ts", "lib/px.ts"]
+}

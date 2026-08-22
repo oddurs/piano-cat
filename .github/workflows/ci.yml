@@ -30,6 +30,16 @@ jobs:
 
       - run: npm ci
 
+      # The hand model is fetched by prebuild rather than vendored, so cache it
+      # on the script that pins its URL and hash. The wasm is copied out of
+      # node_modules every run, so it is deliberately not cached — that way a
+      # tasks-vision bump can never be served stale.
+      - name: Cache hand model
+        uses: actions/cache@v6
+        with:
+          path: public/mediapipe/models
+          key: mediapipe-model-${{ hashFiles('scripts/fetch-mediapipe.mjs') }}
+
       - name: Typecheck
         run: npm run typecheck
 

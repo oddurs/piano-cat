@@ -6,6 +6,7 @@ export type NoteEv = {
   b: number   // start, in pulses (a "pulse" = one thing you mime)
   d: number   // duration, in pulses
   v: number   // 0..1 velocity
+  h?: -1 | 1  // which hand plays it. -1 left, 1 right. Falls back to register.
 }
 
 export type Piece = {
@@ -21,6 +22,7 @@ export type Piece = {
   release: number       // seconds of release ramp (pedal-ish feel)
   accent: string        // hex, drives the palette
   accent2: string
+  resonance: number[]   // midi notes the strings ring in sympathy with
   notes: NoteEv[]
 }
 
@@ -71,10 +73,10 @@ function bachPrelude(): NoteEv[] {
     const [l1, l2, r1, r2, r3] = bar.split(/\s+/).map(m)
     for (let h = 0; h < 2; h++) {
       const t = i * 4 + h * 2
-      out.push({ p: l1, b: t, d: 2, v: 0.62 })
-      out.push({ p: l2, b: t + 0.25, d: 1.75, v: 0.58 })
+      out.push({ p: l1, b: t, d: 2, v: 0.62, h: -1 })
+      out.push({ p: l2, b: t + 0.25, d: 1.75, v: 0.58, h: -1 })
       const fig = [r1, r2, r3, r1, r2, r3]
-      fig.forEach((p, k) => out.push({ p, b: t + 0.5 + k * 0.25, d: 0.3, v: k === 2 || k === 5 ? 0.7 : 0.6 }))
+      fig.forEach((p, k) => out.push({ p, b: t + 0.5 + k * 0.25, d: 0.3, v: k === 2 || k === 5 ? 0.7 : 0.6, h: 1 }))
     }
   })
   const last = BACH_BARS.length * 4
@@ -86,8 +88,8 @@ function bachPrelude(): NoteEv[] {
 
 function furElise(): NoteEv[] {
   const o: NoteEv[] = []
-  const rh = (n: string, b: number, d = 0.5, v = 0.72) => o.push({ p: m(n), b, d, v })
-  const lh = (n: string, b: number, d = 1, v = 0.5) => o.push({ p: m(n), b, d, v })
+  const rh = (n: string, b: number, d = 0.5, v = 0.72) => o.push({ p: m(n), b, d, v, h: 1 })
+  const lh = (n: string, b: number, d = 1, v = 0.5) => o.push({ p: m(n), b, d, v, h: -1 })
 
   // pickup
   rh('E5', 0); rh('D#5', 0.5)
@@ -128,12 +130,12 @@ function moonlight(): NoteEv[] {
   const trip = (fig: string, t: number, beats: number) => {
     const ps = fig.split(/\s+/).map(m)
     for (let k = 0; k < beats; k++)
-      ps.forEach((p, j) => o.push({ p, b: t + k + j / 3, d: 0.34, v: 0.42 }))
+      ps.forEach((p, j) => o.push({ p, b: t + k + j / 3, d: 0.34, v: 0.42, h: 1 }))
   }
   const oct = (a: string, b: string, t: number, d: number) => {
-    o.push({ p: m(a), b: t, d, v: 0.5 }, { p: m(b), b: t, d, v: 0.46 })
+    o.push({ p: m(a), b: t, d, v: 0.5, h: -1 }, { p: m(b), b: t, d, v: 0.46, h: -1 })
   }
-  const mel = (n: string, b: number, d: number) => o.push({ p: m(n), b, d, v: 0.85 })
+  const mel = (n: string, b: number, d: number) => o.push({ p: m(n), b, d, v: 0.85, h: 1 })
 
   trip('G#3 C#4 E4', 0, 4); oct('C#2', 'C#3', 0, 4)
   trip('G#3 C#4 E4', 4, 4); oct('C#2', 'C#3', 4, 4)
@@ -167,8 +169,8 @@ function moonlight(): NoteEv[] {
 
 function minuet(): NoteEv[] {
   const o: NoteEv[] = []
-  const r = (n: string, b: number, d: number, v = 0.75) => o.push({ p: m(n), b, d, v })
-  const l = (n: string, b: number, d: number, v = 0.5) => o.push({ p: m(n), b, d, v })
+  const r = (n: string, b: number, d: number, v = 0.75) => o.push({ p: m(n), b, d, v, h: 1 })
+  const l = (n: string, b: number, d: number, v = 0.5) => o.push({ p: m(n), b, d, v, h: -1 })
 
   r('D5', 0, 1); r('G4', 1, .5); r('A4', 1.5, .5); r('B4', 2, .5); r('C5', 2.5, .5)
   l('G2', 0, 1); l('B2', 1, 1); l('D3', 2, 1)
@@ -205,6 +207,7 @@ export const PIECES: Piece[] = [
     blurb: 'Sixteen notes a bar, all the same shape. You cannot lose. Probably.',
     pulseBpm: 58, pulsesPerBar: 4, stride: 1, loopAt: 80, release: 0.4,
     accent: '#5ff2d6', accent2: '#1b6b7a',
+    resonance: [48, 55, 60, 64, 67, 72, 79],
     notes: bachPrelude(),
   },
   {
@@ -215,6 +218,7 @@ export const PIECES: Piece[] = [
     blurb: 'Everyone knows the first eight notes. The cat knows the rest.',
     pulseBpm: 88, pulsesPerBar: 3, stride: 1, loopAt: 39, release: 0.3,
     accent: '#ffb3d1', accent2: '#8a3a6b',
+    resonance: [45, 52, 57, 60, 64, 69, 76],
     notes: furElise(),
   },
   {
@@ -225,6 +229,7 @@ export const PIECES: Piece[] = [
     blurb: 'Slow. Very slow. Wave like you have somewhere sad to be.',
     pulseBpm: 46, pulsesPerBar: 4, stride: 1, loopAt: 36, release: 1.5,
     accent: '#9fb8ff', accent2: '#26356e',
+    resonance: [37, 49, 56, 61, 64, 68, 73],
     notes: moonlight(),
   },
   {
@@ -235,6 +240,7 @@ export const PIECES: Piece[] = [
     blurb: 'A dance. Three to a bar. Do not fall over.',
     pulseBpm: 96, pulsesPerBar: 3, stride: 1, loopAt: 24, release: 0.26,
     accent: '#ffe27a', accent2: '#7a5a12',
+    resonance: [43, 50, 55, 59, 62, 67, 74],
     notes: minuet(),
   },
 ]

@@ -1,5 +1,6 @@
-import { GW, GH, type Frame } from './motion'
+import { GW, GH } from './camera'
 import { dynMark, type Conductor } from './conductor'
+import type { PlayFrame, Side } from './signal'
 import { Px } from './px'
 import { drawCatBody, drawCatPaws, drawCandelabra, drawMetronome, drawPianoTop, type CatMood, type CatState } from './cat'
 
@@ -34,6 +35,13 @@ export function keyRect(midi: number) {
 
 type Particle = { x: number; y: number; vx: number; vy: number; life: number; c: string; s: number }
 
+export type Chrome = {
+  auto: boolean
+  vibe: string
+  hint: string
+  debug?: { fps: number; p50: number; p95: number; mode: string } | null
+}
+
 export class Renderer {
   px: Px
   cx: CanvasRenderingContext2D
@@ -41,7 +49,7 @@ export class Renderer {
   private parts: Particle[] = []
   private blink = 0
   private nextBlink = 2
-  private dt = 1 / 60
+  private ghost: Record<Side, number> = { L: 0, R: 0 }
   t = 0
 
   constructor(canvas: HTMLCanvasElement) {
@@ -53,28 +61,27 @@ export class Renderer {
     this.px = new Px(this.cx)
   }
 
-  noteFired(midi: number, vel: number, accent: string) {
-    this.keyLight.set(midi, Math.max(this.keyLight.get(midi) ?? 0, 0.35 + vel * 0.65))
+  noteFired(midi: number, vel: number, accent: string, ornament = false) {
+    this.keyLight.set(midi, Math.max(this.keyLight.get(midi) ?? 0, (ornament ? 0.2 : 0.35) + vel * 0.65))
     const k = keyRect(midi)
-    const n = vel > 0.7 ? 3 : vel > 0.4 ? 2 : 1
+    const n = ornament ? 1 : vel > 0.7 ? 3 : vel > 0.4 ? 2 : 1
     for (let i = 0; i < n; i++) {
       this.parts.push({
         x: k.x + k.w / 2 + (Math.random() - 0.5) * 6,
         y: KEY_TOP - 2,
         vx: (Math.random() - 0.5) * 8,
         vy: -16 - vel * 30 - Math.random() * 10,
-        life: 1,
-        c: vel > 0.75 ? '#fff8c4' : accent,
-        s: vel > 0.66 ? 2 : 1,
+        life: ornament ? 0.5 : 1,
+        c: ornament ? '#ffffff' : vel > 0.75 ? '#fff8c4' : accent,
+        s: vel > 0.66 && !ornament ? 2 : 1,
       })
     }
   }
 
   // ------------------------------------------------------------------ frame
 
-  draw(con: Conductor, frame: Frame, dt: number, mood: CatMood, opts: { auto: boolean; vibe: string; hint: string }) {
+  draw(con: Conductor, frame: PlayFrame, dt: number, mood: CatMood, opts: Chrome) {
     this.t += dt
-    this.dt = dt
     const px = this.px
     const p = con.piece
 
@@ -86,6 +93,7 @@ export class Renderer {
 
     this.drawBeatGrid(con)
     this.drawFallingNotes(con)
+    this.drawHands(con, frame)
     this.drawHint(opts.hint)
 
     this.blink -= dt
@@ -101,14 +109,19 @@ export class Renderer {
     drawCandelabra(px, 24, FALL_TOP + 2, this.t)
     drawMetronome(px, W - 26, FALL_TOP + 2, con.pos, con.started)
     drawPianoTop(px, FALL_TOP, FALL_H, W)
+    this.drawDampers(con)
     this.drawKeyboard(con, dt)
+    this.drawLanding(con, frame)
+    this.drawPaws(con, frame)
     drawCatPaws(px, cat, KEY_TOP, con.lastHand, con.strikeFlash)
     this.drawSlip(con)
     this.drawParticles(dt)
     this.drawHud(con, frame, opts)
+    if (opts.debug) this.drawDebug(opts.debug, frame, con)
   }
 
-  private drawCamera(f: Frame, dark: string, accent: string) {
+  private drawCamera(f: PlayFrame, dark: string, accent: string) {
+    if (f.pixels.length < GW * GH) return
     const cx = this.cx
     const px = f.pixels, mk = f.motionMask
     for (let y = 0; y < GH; y++) {
@@ -160,11 +173,78 @@ export class Renderer {
       const h = Math.max(2, (n.d / this.look) * (KEY_TOP - HEAD_H - 2) * 0.85)
       const near = 1 - Math.min(1, Math.max(0, rel / this.look))
       const top = Math.max(HEAD_H, y - h)
-      px.a(0.2 + near * 0.72)
+      // A note whose hand has left the instrument is drawn as an outline: it
+      // is coming, but nobody is going to play it.
+      const side: Side = n.h === -1 ? 'L' : n.h === 1 ? 'R' : n.p < 60 ? 'L' : 'R'
+      const eng = con.engage[side]
+      px.a((0.2 + near * 0.72) * (0.25 + eng * 0.75))
       px.r(k.x, top, Math.max(2, k.w - 1), y - top, con.piece.accent)
-      px.a(0.35 + near * 0.6).r(k.x, Math.max(HEAD_H, y - 1), Math.max(2, k.w - 1), 1, '#ffffff')
+      px.a((0.35 + near * 0.6) * (0.3 + eng * 0.7)).r(k.x, Math.max(HEAD_H, y - 1), Math.max(2, k.w - 1), 1, '#ffffff')
       px.reset
     }
+  }
+
+  /** Your hands, where the camera says they are. Without this you are playing
+   *  an instrument you cannot see, which is most of what felt broken. */
+  private drawHands(con: Conductor, f: PlayFrame) {
+    if (!f.tracked) return
+    const px = this.px
+    for (const side of ['L', 'R'] as Side[]) {
+      const h = f.hands[side]
+      this.ghost[side] += ((h.present ? 1 : 0) - this.ghost[side]) * 0.16
+      if (this.ghost[side] < 0.02) continue
+      const x = Math.round(h.x * W)
+      const y = HEAD_H + Math.round(h.y * (FALL_TOP - HEAD_H))
+      const a = this.ghost[side] * (0.25 + con.engage[side] * 0.55)
+      // a soft column down to the keys: this is the key you are over
+      px.a(a * 0.3).r(x - 1, y, 2, KEY_TOP - y, con.piece.accent)
+      px.a(a).blobOut(x - 5, y - 4, 10, 8, con.piece.accent2, con.piece.accent, 2)
+      px.a(a * 0.9).r(x - 3, y - 2, 6, 3, con.piece.accent)
+      px.reset
+    }
+  }
+
+  /** Paw shadows on the keys themselves, under each hand. */
+  private drawPaws(con: Conductor, f: PlayFrame) {
+    if (!f.tracked) return
+    const px = this.px
+    for (const side of ['L', 'R'] as Side[]) {
+      const h = f.hands[side]
+      if (!h.present) continue
+      const x = Math.round(h.x * W)
+      const w = 6 + Math.round(f.spread * 10)
+      px.a(0.16 + con.engage[side] * 0.3)
+      px.r(x - w / 2, KEY_TOP, w, KEY_H - 5, '#ffffff')
+      px.reset
+    }
+  }
+
+  /** Dampers lifting off the strings as you raise your hands. */
+  private drawDampers(con: Conductor) {
+    const px = this.px
+    const lift = Math.round(con.pedal * 4)
+    for (let x = 8; x < W - 8; x += 6) {
+      px.a(0.5 + con.pedal * 0.4)
+      px.r(x, FALL_TOP + 7 - lift, 3, 4, con.pedal > 0.55 ? con.piece.accent : '#6a5f52')
+      px.reset
+    }
+  }
+
+  /** The converging bracket that tells you when the next beat lands. */
+  private drawLanding(con: Conductor, f: PlayFrame) {
+    if (!con.started) return
+    const px = this.px
+    const cxp = f.tracked && (f.hands.L.present || f.hands.R.present)
+      ? ((f.hands.L.present ? f.hands.L.x : f.hands.R.x) + (f.hands.R.present ? f.hands.R.x : f.hands.L.x)) / 2 * W
+      : W / 2
+    const half = 4 + con.toNextBeat * 46
+    const y = KEY_TOP - 4
+    const hot = con.strikeFlash > 0.55
+    px.a(hot ? 0.95 : 0.35 + (1 - con.toNextBeat) * 0.4)
+    const c = hot ? '#ffffff' : con.piece.accent
+    px.r(cxp - half - 4, y, 4, 2, c)
+    px.r(cxp + half, y, 4, 2, c)
+    px.reset
   }
 
   private drawKeyboard(con: Conductor, dt: number) {
@@ -191,8 +271,10 @@ export class Renderer {
       px.r(k.x, KEY_TOP + d, k.w, 1, '#443c50')
       px.r(k.x, KEY_TOP + h - 1, k.w, 1, '#0d0a10')
     }
+    // Pedalled notes hang on to their light the way they hang on to their sound.
+    const fade = dt * (con.pedal > 0.58 ? 0.7 : 2.2)
     for (const [m, v] of this.keyLight) {
-      const nv = v - dt * 2.2
+      const nv = v - fade
       if (nv <= 0) this.keyLight.delete(m); else this.keyLight.set(m, nv)
     }
   }
@@ -234,7 +316,7 @@ export class Renderer {
 
   // -------------------------------------------------------------------- hud
 
-  private drawHud(con: Conductor, f: Frame, o: { auto: boolean; vibe: string; hint: string }) {
+  private drawHud(con: Conductor, f: PlayFrame, o: Chrome) {
     const px = this.px
     const p = con.piece
 
@@ -267,16 +349,24 @@ export class Renderer {
       px.r(mx + i * (sw + 1), FOOT_TOP + 6, sw, 7,
         on ? (hot ? '#ff6a5a' : p.accent) : '#241d33')
     }
-    px.a(0.9).r(mx + Math.min(1, f.energy * 7) * (seg * (sw + 1)), FOOT_TOP + 4, 1, 11, '#ffffff')
+    px.a(0.9).r(mx + Math.min(1, f.travel) * (seg * (sw + 1)), FOOT_TOP + 4, 1, 11, '#ffffff')
     px.reset
 
-    // which hand you're leaning on
+    // how much of each hand is actually in the performance
     const bx = mx + seg * (sw + 1) + 12
-    const tot = f.left + f.right + 1e-5
-    px.text('L', bx - 9, FOOT_TOP + 6, f.left > f.right ? p.accent : '#4c4763')
-    px.r(bx, FOOT_TOP + 8, 28, 3, '#241d33')
-    px.r(bx + (f.right / tot) * 24, FOOT_TOP + 6, 4, 7, '#ffffff')
-    px.text('R', bx + 31, FOOT_TOP + 6, f.right > f.left ? p.accent : '#4c4763')
+    for (const [i, side] of (['L', 'R'] as Side[]).entries()) {
+      const e = con.engage[side]
+      const on = f.hands[side].present || !f.tracked
+      px.text(side, bx + i * 20, FOOT_TOP + 4, on ? px.mix('#4c4763', p.accent, e) : '#4c4763')
+      px.r(bx + i * 20, FOOT_TOP + 14, 14, 2, '#241d33')
+      px.r(bx + i * 20, FOOT_TOP + 14, Math.round(14 * e), 2, on ? p.accent : '#4c4763')
+    }
+
+    // damper pedal, held by your hands
+    const px0 = bx + 44
+    px.text('PED', px0, FOOT_TOP + 4, con.pedal > 0.58 ? p.accent : '#4c4763')
+    px.r(px0, FOOT_TOP + 14, 26, 2, '#241d33')
+    px.r(px0, FOOT_TOP + 14, Math.round(26 * con.pedal), 2, con.pedal > 0.58 ? '#ffffff' : p.accent)
 
     const badge = o.auto ? 'AUTO' : o.vibe
     const bw = px.textW(badge) + 8
@@ -284,7 +374,21 @@ export class Renderer {
     px.text(badge, W - bw, FOOT_TOP + 6, o.auto ? '#6f6a86' : '#ffffff')
 
     px.r(0, H - 2, W, 2, '#241d33')
-    px.r(0, H - 2, W * con.progress, 2, p.accent)
+  }
 
+  /** Held on `D`. The numbers that decide whether this feels like an
+   *  instrument: camera rate, and how long your gesture took to become sound. */
+  private drawDebug(d: NonNullable<Chrome['debug']>, f: PlayFrame, con: Conductor) {
+    const px = this.px
+    const lines = [
+      `${d.mode[0]} ${d.fps.toFixed(0)}FPS`,
+      `${d.p50.toFixed(0)}/${d.p95.toFixed(0)}MS`,
+      `DYN ${f.dyn.toFixed(1)}`,
+      `L${con.engage.L.toFixed(1)}R${con.engage.R.toFixed(1)}`,
+    ]
+    const w = Math.max(...lines.map((l) => px.textW(l, 8))) + 6
+    px.a(0.82).r(W - w - 3, HEAD_H + 3, w, lines.length * 9 + 3, '#050409')
+    px.reset
+    lines.forEach((l, i) => px.text(l, W - w, HEAD_H + 5 + i * 9, i === 1 && d.p95 > 90 ? '#ff6a5a' : '#7de0c0'))
   }
 }
