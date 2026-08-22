@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# PR runs supersede each other; main runs all see it through to a deploy.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Beat-follower regression tests
+        run: npm test
+
+      - name: Build static export
+        run: npm run build
+        env:
+          # the site is served from /<repo>/ on Pages
+          NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
+
+      # on a PR the build is downloadable so you can poke at it before merging
+      - name: Upload preview build
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: preview-pr-${{ github.event.pull_request.number }}
+          path: out
+          retention-days: 7
+
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/configure-pages@v6
+
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: out
+
+  deploy:
+    needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

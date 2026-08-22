@@ -28,6 +28,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks || true",
     "dev": "next dev -p 9393",
     "build": "next build",
     "preview": "npx --yes serve out -l 9393",

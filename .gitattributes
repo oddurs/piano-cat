@@ -1,0 +1,9 @@
+* text=auto eol=lf
+
+*.mp3    binary
+*.png    binary
+*.woff2  binary
+*.ttf    binary
+
+# generated — keep it out of PR diffs
+package-lock.json  linguist-generated=true -diff

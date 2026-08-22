@@ -1,0 +1,12 @@
+#!/bin/sh
+# Nothing leaves the machine without a typecheck and the timing tests passing.
+# They take a few seconds. SKIP_HOOKS=1 git push  to bypass in an emergency.
+[ "$SKIP_HOOKS" = "1" ] && exit 0
+
+printf '\033[2m→ typecheck\033[0m\n'
+npm run --silent typecheck || { echo "pre-push: typecheck failed"; exit 1; }
+
+printf '\033[2m→ beat-follower tests\033[0m\n'
+npm run --silent test >/dev/null || { echo "pre-push: npm test failed — run it to see which check broke"; exit 1; }
+
+exit 0

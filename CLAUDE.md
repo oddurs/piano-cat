@@ -46,6 +46,30 @@ keystroke.
   urtext and the README says so; keep it that way rather than implying accuracy
   that isn't there.
 
+## Git workflow
+
+`main` is always deployable — merging to it publishes to Pages. So:
+
+- **Never commit to `main` directly.** Branch from fresh `origin/main`, open a
+  PR, let CI gate it, squash-merge. `/ship` runs the whole cycle.
+- **Branch names** are kebab-case and describe the change: `fix-onset-jitter`,
+  `add-chopin-nocturne`.
+- **Commit subjects** are imperative and under ~70 characters. The body says
+  *why*, not which files moved. **No Claude attribution trailer, ever.**
+- **One branch ↔ one worktree ↔ one PR**, through to a squash-merge.
+- A `pre-push` hook (wired by `npm install` via `core.hooksPath`) runs typecheck
+  and `npm test` before anything leaves the machine. If you find yourself
+  reaching for `SKIP_HOOKS=1`, fix the code instead.
+- `gh pr merge --auto --squash` is the merge command — it waits for green CI and
+  deletes the branch. Do not merge around a red check.
+- Dependabot patch bumps auto-merge once CI is green; minor and major bumps wait
+  for a human, because this project's feel lives in timing constants.
+
+`main` carries a ruleset: no force-pushes, no deletion, PRs with a passing
+`check` job. Repository admins can bypass it, so you will never be locked out —
+but bypassing is a decision, not a shortcut. Inspect it with
+`gh api repos/oddurs/piano-cat/rulesets`.
+
 ## Worktrees
 
 Per-task isolation, sited outside the working copy:

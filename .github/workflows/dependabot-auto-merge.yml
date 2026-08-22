@@ -1,0 +1,24 @@
+name: Dependabot auto-merge
+
+# Patch bumps land on their own once CI is green. Minor and major updates wait
+# for a human — this project's feel lives in timing constants, and a surprise
+# framework bump is not something to discover from a deploy.
+on: pull_request_target
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - id: meta
+        uses: dependabot/fetch-metadata@v3
+
+      - if: steps.meta.outputs.update-type == 'version-update:semver-patch'
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
