@@ -6,6 +6,9 @@ node_modules/
 # next
 /.next/
 /out/
+# next rewrites this differently for `next dev` vs `next build`, so tracking it
+# means a permanently dirty file. tsc --noEmit passes without it.
+next-env.d.ts
 *.tsbuildinfo
 
 # headless render output (npm run shot)
