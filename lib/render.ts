@@ -1,6 +1,6 @@
 import { GW, GH } from './camera'
 import { dynMark, type Conductor } from './conductor'
-import type { PlayFrame, Side } from './signal'
+import { clamp, type PlayFrame, type Side } from './signal'
 import { Px } from './px'
 import { drawCatBody, drawCatPaws, drawCandelabra, drawMetronome, drawPianoTop, type CatMood, type CatState } from './cat'
 
@@ -193,13 +193,20 @@ export class Renderer {
       const h = f.hands[side]
       this.ghost[side] += ((h.present ? 1 : 0) - this.ghost[side]) * 0.16
       if (this.ghost[side] < 0.02) continue
+      // The camera backdrop covers the whole canvas, so a hand has to be drawn
+      // where the backdrop actually put it or the ghost floats off your body.
+      // Only the vertical is clamped, and only enough to keep it out of the
+      // header and off the keys.
       const x = Math.round(h.x * W)
-      const y = HEAD_H + Math.round(h.y * (FALL_TOP - HEAD_H))
+      const y = clamp(Math.round(h.y * H), HEAD_H + 5, KEY_TOP - 12)
       const a = this.ghost[side] * (0.25 + con.engage[side] * 0.55)
+      const c = con.piece.accent
       // a soft column down to the keys: this is the key you are over
-      px.a(a * 0.3).r(x - 1, y, 2, KEY_TOP - y, con.piece.accent)
-      px.a(a).blobOut(x - 5, y - 4, 10, 8, con.piece.accent2, con.piece.accent, 2)
-      px.a(a * 0.9).r(x - 3, y - 2, 6, 3, con.piece.accent)
+      px.a(a * 0.28).r(x - 1, y + 3, 2, KEY_TOP - y - 3, c)
+      // a paw, not a lollipop — a pad with three toes above it
+      px.a(a).blobOut(x - 5, y - 1, 10, 6, con.piece.accent2, c, 2)
+      for (const dx of [-4, -1, 2]) px.a(a).r(x + dx, y - 4, 3, 3, c)
+      px.a(a * 0.55).r(x - 3, y + 1, 6, 2, c)
       px.reset
     }
   }

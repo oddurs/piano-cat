@@ -41,7 +41,11 @@ export default function Page() {
   const selRef = useRef(0)
   const statusRef = useRef('')
   const doneRef = useRef(0)
-  const camWarnRef = useRef<string | null>(null)
+  // A warning is news, not a permanent fixture. On the play screen it expires,
+  // because a stale 'CAMERA DECLINED' used to sit in the hint panel for the
+  // rest of the session hiding every hint that would actually have helped. On
+  // the menu it persists, because that is where you can act on it.
+  const warnRef = useRef<{ text: string; until: number } | null>(null)
   const calUntilRef = useRef(0)
   const takeRef = useRef(1)
   const autoRef = useRef(false)
@@ -51,6 +55,13 @@ export default function Page() {
   const debugRef = useRef(false)
 
   const setScreen = (s: Screen) => { screenRef.current = s; setScreenState(s) }
+  const warn = (text: string | null, secs = 9) => {
+    warnRef.current = text ? { text, until: performance.now() / 1000 + secs } : null
+  }
+  const liveWarn = (now: number) => {
+    const w = warnRef.current
+    return w && now <= w.until ? w.text : null
+  }
   useEffect(() => { autoRef.current = auto }, [auto])
   useEffect(() => { perRef.current.sensitivity = sens }, [sens])
   useEffect(() => { conRef.current?.setStride(stride) }, [stride])
@@ -101,18 +112,18 @@ export default function Page() {
     if (!cam.stream) {
       try {
         await cam.start()
-        camWarnRef.current = null
+        warn(null)
         fresh = true
       } catch (e) {
-        camWarnRef.current = (e as Error)?.name === 'NotAllowedError'
-          ? 'CAMERA DECLINED - USE SPACE' : 'NO CAMERA - USE SPACE'
+        warn((e as Error)?.name === 'NotAllowedError'
+          ? 'CAMERA DECLINED - USE SPACE' : 'NO CAMERA - USE SPACE')
       }
     }
 
     if (cam.stream) {
       statusRef.current = 'teaching the cat to see hands...'
       await cam.loadHands((v) => { doneRef.current = 0.55 + v * 0.45 })
-      if (cam.modelNote) camWarnRef.current = cam.modelNote
+      if (cam.modelNote) warn(cam.modelNote)
     }
     doneRef.current = 1
 
@@ -132,7 +143,7 @@ export default function Page() {
           takeStrike(now, st.strength, st.side)
         }
       }
-      cam.onLost = () => { camWarnRef.current = 'CAMERA LOST - USE SPACE' }
+      cam.onLost = () => { warn('CAMERA LOST - USE SPACE') }
     }
 
     const con = new Conductor(p, piano)
@@ -187,7 +198,7 @@ export default function Page() {
 
       const scr = screenRef.current
       if (scr === 'menu') {
-        drawMenu(ren.px, { pieces: PIECES, sel: selRef.current, t, camWarn: camWarnRef.current })
+        drawMenu(ren.px, { pieces: PIECES, sel: selRef.current, t, camWarn: warnRef.current?.text ?? null })
       } else if (scr === 'loading') {
         drawLoading(ren.px, { t, status: statusRef.current, done: doneRef.current })
       } else if (scr === 'calibrate') {
@@ -251,7 +262,8 @@ export default function Page() {
         let hint = ''
         const cam = camRef.current
         if (!autoRef.current) {
-          if (camWarnRef.current) hint = camWarnRef.current
+          const w = liveWarn(now)
+          if (w) hint = w
           else if (cam?.mode === 'hands' && !f.tracked) hint = 'SHOW ME YOUR HANDS'
           else if (!sawFirstRef.current) hint = 'PLAY A KEY IN THE AIR'
           else if (asleep) hint = 'the cat is waiting'
@@ -324,10 +336,11 @@ export default function Page() {
       if (!piano?.ready) return
       if (document.hidden) {
         piano.silenceForHiddenTab()
-        conRef.current?.reset()
-        sawFirstRef.current = false
       } else {
         piano.resume()
+        // Put the beat back under the playhead rather than starting over —
+        // alt-tabbing is not a mistake and should not cost you your take.
+        conRef.current?.reanchor(performance.now() / 1000)
       }
     }
     document.addEventListener('visibilitychange', onVis)
