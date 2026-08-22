@@ -16,6 +16,13 @@ export type Expression = {
 }
 
 export type StrikeKind = 'start' | 'beat' | 'chord' | 'ornament' | 'over'
+
+/** Something the cat has an opinion about. Moods say what you have been like
+ *  for the last few seconds; these say what just happened. */
+export type Reaction = 'stumble' | 'nailed' | 'startled' | 'bow'
+/** how long each one holds the cat's face before anything else may take it */
+const REACT_HOLD: Record<Reaction, number> = { stumble: 0.55, nailed: 1.1, startled: 0.5, bow: 1e9 }
+const REACT_RANK: Record<Reaction, number> = { stumble: 2, nailed: 1, startled: 2, bow: 9 }
 export type FiredNote = { p: number; vel: number; t: number; kind: 'note' | 'ornament' }
 
 /** What the performance was like, once there is a whole one to judge. */
@@ -98,6 +105,10 @@ export class Conductor {
    */
   loop = false
   finished = false
+  /** Aged by update() rather than read off a clock — the camera's clock stops
+   *  when the camera does, and a frozen face is worse than no face. */
+  reaction: { kind: Reaction; age: number } | null = null
+  private lastBar = -1
   private tally = { strokes: 0, notes: 0, dynLo: 1, dynHi: 0, steadySum: 0, steadyN: 0 }
 
   intervals: number[] = []
@@ -148,6 +159,7 @@ export class Conductor {
   strike(now: number, strength: number, side: Side): StrikeKind {
     if (this.finished) return 'over'
     this.tally.strokes += 1
+    if (strength > 0.88) this.react('startled')
     this.hit[side] += (strength - this.hit[side]) * 0.55
     this.engage[side] = 1
     this.lastHand = side === 'L' ? -1 : 1
@@ -169,6 +181,7 @@ export class Conductor {
     if (gap < CHORD_WINDOW && side !== this.lastSide) {
       this.lastSide = side
       this.strikeFlash = Math.max(this.strikeFlash, 0.8)
+      this.react('startled')      // both hands at once always gets a look
       this.reinforce(side, now, strength)
       return 'chord'
     }
@@ -189,7 +202,10 @@ export class Conductor {
       // Believe a new tempo more while you're settling in, much less when it
       // looks like a stumble rather than a real change of pace.
       let trust = this.strikeCount < 5 ? 0.45 : 0.26
-      if (ratio < 0.65 || ratio > 1.6) trust *= 0.35
+      if (ratio < 0.65 || ratio > 1.6) {
+        trust *= 0.35
+        this.react('stumble')      // that was not where the beat was
+      }
       this.period = clamp(this.period * (1 - trust) + gap * trust, 0.28, 2.6)
       this.intervals.push(gap)
       if (this.intervals.length > 16) this.intervals.shift()
@@ -202,6 +218,20 @@ export class Conductor {
     // this beat sound with the gesture that asked for them.
     this.advance(this.beatOrigin)
     return 'beat'
+  }
+
+  /**
+   * The cat's face is a scarce resource. Whatever is on it holds for its own
+   * span before anything of equal weight may take it, so reactions read as
+   * reactions instead of flickering.
+   */
+  private react(kind: Reaction) {
+    const cur = this.reaction
+    if (cur) {
+      if (cur.kind === 'bow') return
+      if (cur.age < REACT_HOLD[cur.kind] && REACT_RANK[kind] <= REACT_RANK[cur.kind]) return
+    }
+    this.reaction = { kind, age: 0 }
   }
 
   /** The only place pos ever moves. Anywhere else and a take that rolls over
@@ -274,6 +304,7 @@ export class Conductor {
   // ------------------------------------------------------------------ update
 
   update(dt: number, now: number, ex: Expression) {
+    if (this.reaction) this.reaction.age += dt
     this.strikeFlash = Math.max(0, this.strikeFlash - dt * 4.5)
     this.ornamentFlash = Math.max(0, this.ornamentFlash - dt * 6)
 
@@ -298,6 +329,17 @@ export class Conductor {
     this.piano.stir(ex.travel, meanX, ex.dyn)
 
     if (!this.started) return
+
+    if (this.finished) this.react('bow')
+
+    // A whole bar kept in time is the smallest thing worth being pleased about.
+    const bar = Math.floor(this.playhead / this.piece.pulsesPerBar)
+    if (bar !== this.lastBar) {
+      if (this.lastBar >= 0 && this.strikeCount > 4 && this.unsteadiness < 0.2) {
+        this.react('nailed')
+      }
+      this.lastBar = bar
+    }
 
     // where the music *should* be if you keep going at this pace
     let frac = (now - this.lastStrikeAt) / this.period
@@ -432,6 +474,8 @@ export class Conductor {
     this.phase = 0
     this.pedal = 0
     this.finished = false
+    this.reaction = null
+    this.lastBar = -1
     this.tally = { strokes: 0, notes: 0, dynLo: 1, dynHi: 0, steadySum: 0, steadyN: 0 }
   }
 

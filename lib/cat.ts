@@ -1,6 +1,7 @@
 import type { Px } from './px'
 
 export type CatMood = 'sleep' | 'calm' | 'happy' | 'wild'
+export type CatReaction = 'stumble' | 'nailed' | 'startled' | 'bow'
 
 const FUR = '#e0873a', FUR_D = '#ac5f27', FUR_L = '#f3ae63'
 const CREAM = '#f8e6c4', INK = '#241710', PINK = '#f0899f'
@@ -16,14 +17,24 @@ export type CatState = {
   t: number           // wall clock, for blinks and flames
   blinkOpen: boolean
   strike: number      // 0..1, decaying flash from the last stroke
+  /** what just happened, and how long ago. Outranks mood on the face. */
+  react?: { kind: CatReaction; age: number } | null
+  pedal?: number      // 0..1, dampers up — the ears go with them
 }
 
 /** Head, body and tail. Draw before the piano — the cat sits behind it. */
 export function drawCatBody(px: Px, s: CatState) {
   const { cx, mood, dyn } = s
   const asleep = mood === 'sleep'
+  const r = s.react ?? null
+  const bowing = r?.kind === 'bow'
+  const pedal = s.pedal ?? 0
+  // a bow settles over half a second and then stays there
+  const bowDip = bowing ? Math.min(1, (r!.age) / 0.5) * 7 : 0
+  // being pleased with yourself is a small hop, not a pose
+  const hop = r?.kind === 'nailed' ? -Math.max(0, Math.sin(r.age * 7)) * 3 : 0
   const bob = asleep ? Math.sin(s.t * 1.6) * 1 : Math.cos(s.phase * Math.PI * 2) * (1 + dyn * 2.2)
-  const y = s.headTop + Math.round(bob * 0.5)
+  const y = s.headTop + Math.round(bob * 0.5 + bowDip + hop)
   const bodyTop = y + 34
   const puff = Math.round(dyn * 3)
 
@@ -49,7 +60,14 @@ export function drawCatBody(px: Px, s: CatState) {
 
   // ears — they perk on every stroke
   const hx = cx - 21
-  const ey = y - Math.round(s.strike * 2)
+  // Ears ride the dampers: hands up, pedal down, ears up. They flatten when
+  // you stumble and bolt upright when something startles them.
+  const ey = y - Math.round(
+    s.strike * 2 + pedal * 3
+    + (r?.kind === 'startled' ? 3 : 0)
+    - (r?.kind === 'stumble' ? 2 : 0)
+    - (bowing ? 1 : 0),
+  )
   px.tri(hx + 8, ey - 9, 15, 12, EDGE)
   px.tri(hx + 34, ey - 9, 15, 12, EDGE)
   px.tri(hx + 8, ey - 8, 13, 11, FUR)
@@ -68,17 +86,29 @@ export function drawCatBody(px: Px, s: CatState) {
   px.r(hx + 28, y + 7, 6, 2, FUR_D)
   px.blob(hx + 11, y + 19, 20, 13, CREAM, 4)
 
-  // eyes
+  // eyes — what just happened beats what you have been like
   const shut = asleep || !s.blinkOpen
+  const eyes: 'shut' | 'wide' | 'happy' | 'squeeze' | 'open' =
+    r?.kind === 'stumble' ? 'squeeze'
+      : r?.kind === 'startled' ? 'wide'
+        : r?.kind === 'nailed' || bowing ? 'happy'
+          : shut ? 'shut'
+            : mood === 'wild' ? 'wide'
+              : mood === 'happy' ? 'happy' : 'open'
   for (const ex of [hx + 10, hx + 26]) {
-    if (shut) {
+    if (eyes === 'squeeze') {
+      // screwed shut — the face you pull when you know you were early
+      px.r(ex, y + 11, 2, 2, INK); px.r(ex + 5, y + 11, 2, 2, INK)
+      px.r(ex + 2, y + 13, 3, 2, INK)
+      px.r(ex, y + 15, 2, 2, INK); px.r(ex + 5, y + 15, 2, 2, INK)
+    } else if (eyes === 'shut') {
       px.r(ex, y + 14, 7, 1, INK)
       px.r(ex + 1, y + 13, 5, 1, INK)
-    } else if (mood === 'wild') {
+    } else if (eyes === 'wide') {
       px.r(ex - 1, y + 9, 8, 10, '#fff')
       px.r(ex, y + 8, 6, 1, EDGE)
       px.r(ex + 2, y + 12 + Math.sin(s.t * 21) * 1.6, 3, 4, INK)
-    } else if (mood === 'happy') {
+    } else if (eyes === 'happy') {
       px.r(ex - 1, y + 15, 3, 2, INK); px.r(ex + 1, y + 13, 3, 2, INK)
       px.r(ex + 3, y + 13, 3, 2, INK); px.r(ex + 5, y + 15, 3, 2, INK)
     } else {
@@ -90,10 +120,12 @@ export function drawCatBody(px: Px, s: CatState) {
 
   // nose, mouth, whiskers
   px.tri(hx + 21, y + 20, 5, 3, PINK)
-  if (mood === 'wild') {
+  if (eyes === 'squeeze') {
+    px.r(hx + 18, y + 25, 7, 1, INK)          // a flat, unimpressed line
+  } else if (mood === 'wild' || eyes === 'wide') {
     px.blob(hx + 17, y + 24, 9, 6, '#7a1f2e', 2)
     px.r(hx + 19, y + 26, 5, 3, PINK)
-  } else if (mood === 'happy') {
+  } else if (eyes === 'happy') {
     px.r(hx + 17, y + 24, 2, 1, INK); px.r(hx + 24, y + 24, 2, 1, INK)
     px.r(hx + 19, y + 25, 5, 1, INK)
   } else {
@@ -128,7 +160,20 @@ export function drawCatBody(px: Px, s: CatState) {
     px.r(hx + 42, y + 9, 1, 2, '#8fd6ff')
     px.r(hx - 3, y + 2, 3, 5, '#8fd6ff')
   }
-  if (mood === 'happy' && Math.sin(s.t * 3) > 0.2) {
+  if (r?.kind === 'stumble') {
+    // a bead of sweat, flicking off as it goes
+    const a = r.age / 0.55
+    px.r(hx + 40 + a * 4, y + 2 + a * 9, 2, 3, '#bfe6ff')
+    px.r(hx + 40 + a * 4, y + 5 + a * 9, 2, 1, '#8fd6ff')
+  }
+  if (bowing) {
+    for (const [i, ch] of ['*', '*'].entries()) {
+      const a = ((s.t * 0.7 + i * 0.5) % 1)
+      px.a(1 - a).text(ch, cx + (i ? 22 : -30), y + 6 - a * 12, '#ffe27a')
+    }
+    px.reset
+  }
+  if (r?.kind === 'nailed' || (mood === 'happy' && Math.sin(s.t * 3) > 0.2)) {
     // A beamed pair. The old glyph was a stem with a foot on the bottom left,
     // which is a capital L — noteheads and a beam are what make it read as
     // music at the size this is actually seen.

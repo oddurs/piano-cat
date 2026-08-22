@@ -196,3 +196,52 @@ test('the take loops without dropping notes', () => {
   assert.equal(con.loops, 2)
   assert.ok(piano.played.length > PIECES[3].notes.length * 1.8, 'both takes should be complete')
 })
+
+test('the cat winces when you land nowhere near the beat', () => {
+  const { con } = rig()
+  con.strike(0, 0.6, 'R')
+  con.update(1 / 60, 0, ex())
+  con.strike(con.period, 0.6, 'L')
+  con.update(1 / 60, con.period, ex())
+  assert.notEqual(con.reaction?.kind, 'stumble', 'a beat on time is not a stumble')
+
+  // Half a beat early: late enough to be a beat rather than an ornament,
+  // wrong enough that it is plainly not where the pulse was.
+  const early = con.period * 1.5
+  con.strike(early, 0.6, 'R')
+  con.update(1 / 60, early, ex())
+  assert.equal(con.reaction?.kind, 'stumble')
+})
+
+test('both hands at once always gets a look', () => {
+  const { con } = rig()
+  con.strike(0, 0.6, 'R')
+  con.update(1 / 60, 0, ex())
+  con.strike(0.04, 0.6, 'L')
+  assert.equal(con.reaction?.kind, 'startled')
+})
+
+test('finishing makes it bow, and nothing takes that away', () => {
+  const { con } = rig(PIECES[3])
+  let t = 0
+  while (!con.finished && t < 120) {
+    con.strike(t, 0.95, 'R')                  // loud enough to startle, normally
+    const p = con.period
+    for (let k = 0; k < 30; k++) { t += p / 30; con.update(p / 30, t, ex()) }
+  }
+  assert.ok(con.finished)
+  assert.equal(con.reaction?.kind, 'bow')
+  con.strike(t + 1, 1, 'L')
+  con.update(1 / 60, t + 1, ex())
+  assert.equal(con.reaction?.kind, 'bow', 'a bow outranks everything')
+})
+
+test('a reaction holds its place and then ages out', () => {
+  const { con } = rig()
+  con.strike(0, 0.95, 'R')                    // startled
+  con.update(1 / 60, 0, ex())
+  assert.equal(con.reaction?.kind, 'startled')
+  const age0 = con.reaction!.age
+  for (let k = 0; k < 30; k++) con.update(1 / 60, k / 60, ex())
+  assert.ok(con.reaction!.age > age0, 'reactions age on their own clock')
+})
