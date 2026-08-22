@@ -39,6 +39,10 @@ export type Chrome = {
   auto: boolean
   vibe: string
   hint: string
+  /** beats left in the count-in, or null once the piece is yours */
+  countIn?: number | null
+  /** the last chord is ringing and the performance is over */
+  over?: boolean
   debug?: { fps: number; p50: number; p95: number; mode: string } | null
 }
 
@@ -117,7 +121,35 @@ export class Renderer {
     this.drawSlip(con)
     this.drawParticles(dt)
     this.drawHud(con, frame, opts)
+    if (opts.countIn != null) this.drawCountIn(opts.countIn, con)
+    if (opts.over) this.drawFine(con)
     if (opts.debug) this.drawDebug(opts.debug, frame, con)
+  }
+
+  /** Somebody has to set the tempo before you can be asked to keep it. */
+  private drawCountIn(left: number, con: Conductor) {
+    const px = this.px
+    const n = String(Math.max(1, left))
+    const pulse = 1 - ((this.t * 2) % 1)
+    px.a(0.6).r(0, HEAD_H, W, FALL_TOP - HEAD_H, '#08060f')
+    px.reset
+    // A card, clear of the cat's head — a bare numeral over the fur was
+    // unreadable at the size anyone actually sees this.
+    const w = 74, x = W / 2 - w / 2, y = 22
+    px.panel(x, y, w, 34, '#151123', px.mix(con.piece.accent2, '#ffffff', .35), '#08060f')
+    px.textCS(n, W / 2, y + 4, '#ffffff', con.piece.accent2, 16, 2)
+    px.a(0.55 + pulse * 0.45).textC('JOIN IN', W / 2, y + 23, con.piece.accent)
+    px.reset
+  }
+
+  /** The double bar. Everything stops except the room. */
+  private drawFine(con: Conductor) {
+    const px = this.px
+    const w = px.textW('FINE') + 22
+    px.a(0.85).r(W / 2 - w / 2, 26, w, 17, '#0f0c1a')
+    px.reset
+    px.panel(W / 2 - w / 2, 26, w, 17, '#151123', px.mix(con.piece.accent2, '#ffffff', .35), '#08060f')
+    px.textCS('FINE', W / 2, 31, '#ffffff', con.piece.accent2)
   }
 
   private drawCamera(f: PlayFrame, dark: string, accent: string) {

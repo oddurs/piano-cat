@@ -10,13 +10,19 @@ import { Probe, Recorder } from '@/lib/capture'
 import { restingHand, type PlayFrame, type Side } from '@/lib/signal'
 import { Conductor, type Expression } from '@/lib/conductor'
 import { Renderer, setFont, W, H, type CatMood } from '@/lib/render'
-import { drawMenu, drawLoading, drawCalibrate, menuRowAt } from '@/lib/menu'
+import { drawMenu, drawLoading, drawCalibrate, drawVerdict, menuRowAt } from '@/lib/menu'
 
 const pixel = Press_Start_2P({ weight: '400', subsets: ['latin'], variable: '--pixel' })
 
-type Screen = 'menu' | 'loading' | 'calibrate' | 'play'
+type Screen = 'menu' | 'loading' | 'calibrate' | 'play' | 'verdict'
+/** the piece is yours after this many counted beats, or on your first stroke */
+type CountIn = { left: number; at: number } | null
 /** long enough to reach up and down once, short enough not to be a chore */
 const CALIBRATION = 3.4
+/** let the last chord ring before anyone claps over it */
+const RING_OUT = 2.8
+/** long enough that a trailing stroke cannot skip your own verdict */
+const VERDICT_GRACE = 2
 
 export default function Page() {
   const [screen, setScreenState] = useState<Screen>('menu')
@@ -53,6 +59,10 @@ export default function Page() {
   const keySideRef = useRef<Side>('R')
   const autoAccRef = useRef(0)
   const debugRef = useRef(false)
+  const countRef = useRef<CountIn>(null)
+  const overAtRef = useRef(0)
+  const clappedRef = useRef(false)
+  const verdictAtRef = useRef(0)
 
   const setScreen = (s: Screen) => { screenRef.current = s; setScreenState(s) }
   const warn = (text: string | null, secs = 9) => {
@@ -87,7 +97,9 @@ export default function Page() {
   // is the one place in the app where a frame is worth saving.
   const takeStrike = useCallback((now: number, strength: number, side: Side) => {
     const con = conRef.current
-    if (!con || screenRef.current !== 'play') return
+    if (!con || screenRef.current !== 'play' || con.finished) return
+    // Coming in early is not a mistake, it is you taking the piece over.
+    countRef.current = null
     con.strike(now, strength, side)
     sawFirstRef.current = true
   }, [])
@@ -152,6 +164,9 @@ export default function Page() {
     takeRef.current = 1; setTake(1)
     sawFirstRef.current = false
     autoAccRef.current = 0
+    clappedRef.current = false
+    overAtRef.current = 0
+    countRef.current = { left: p.pulsesPerBar, at: performance.now() / 1000 + 0.7 }
     probeRef.current.clear()
 
     if (cam.stream && cam.mode === 'hands') {
@@ -171,11 +186,30 @@ export default function Page() {
   }, [])
 
   const restart = useCallback(() => {
+    const con = conRef.current
     pianoRef.current?.allOff(0.2)
-    conRef.current?.reset()
+    con?.reset()
     sawFirstRef.current = false
+    clappedRef.current = false
+    overAtRef.current = 0
+    countRef.current = con ? { left: con.piece.pulsesPerBar, at: performance.now() / 1000 + 0.5 } : null
     takeRef.current = 1
     setTake(1)
+  }, [])
+
+  /** Round again, at the pace you already found. */
+  const encore = useCallback(() => {
+    const con = conRef.current
+    if (!con) return
+    pianoRef.current?.allOff(0.25)
+    con.encore()
+    sawFirstRef.current = false
+    clappedRef.current = false
+    overAtRef.current = 0
+    countRef.current = { left: con.piece.pulsesPerBar, at: performance.now() / 1000 + 0.5 }
+    takeRef.current += 1
+    setTake((v) => v + 1)
+    setScreen('play')
   }, [])
 
   // ------------------------------------------------------- one loop, all screens
@@ -214,9 +248,26 @@ export default function Page() {
           perRef.current.endCalibration()
           setScreen('play')
         }
+      } else if (scr === 'verdict') {
+        const con = conRef.current!
+        drawVerdict(ren.px, { t, piece: con.piece, report: con.report, take: takeRef.current })
       } else {
         const con = conRef.current!
         const f = frameRef.current
+
+        // --- count-in: somebody has to give you the tempo before asking you
+        // to keep it. Any stroke of your own cancels it.
+        const count = countRef.current
+        if (count && !autoRef.current) {
+          if (now >= count.at) {
+            pianoRef.current?.tick(count.left === con.piece.pulsesPerBar)
+            count.left -= 1
+            count.at = now + con.period
+            if (count.left <= 0) countRef.current = null
+          }
+        } else if (count) {
+          countRef.current = null
+        }
 
         if (autoRef.current) {
           autoAccRef.current += dt
@@ -243,7 +294,21 @@ export default function Page() {
         }
         con.update(dt, now, ex)
         for (const n of con.drain()) ren.noteFired(n.p, n.vel, con.piece.accent, n.kind === 'ornament')
-        if (con.loops + 1 !== takeRef.current) { takeRef.current = con.loops + 1; setTake(con.loops + 1) }
+
+        // --- the ending. Let the last chord ring on its own before the room
+        // does anything, then hand over to the verdict.
+        if (con.finished) {
+          if (!overAtRef.current) overAtRef.current = now
+          const since = now - overAtRef.current
+          if (since > 1.1 && !clappedRef.current) {
+            clappedRef.current = true
+            pianoRef.current?.applaud()
+          }
+          if (since > RING_OUT && screenRef.current !== 'verdict') {
+            verdictAtRef.current = now
+            setScreen('verdict')
+          }
+        }
 
         const asleep = (sawFirstRef.current && con.idleFor > 2.4) || (!sawFirstRef.current && f.dyn < 0.06)
         const u = con.unsteadiness
@@ -272,7 +337,9 @@ export default function Page() {
         ren.draw(con, f, dt, mood, {
           auto: autoRef.current,
           vibe,
-          hint,
+          hint: con.finished ? '' : hint,
+          countIn: countRef.current?.left ?? null,
+          over: con.finished,
           debug: debugRef.current
             ? {
               fps: cam?.fps ?? 0,
@@ -305,6 +372,17 @@ export default function Page() {
         calUntilRef.current = 0
         return
       }
+      if (screenRef.current === 'verdict') {
+        // Somebody who is still tapping when the piece ends would encore
+        // straight past their own verdict without ever seeing it.
+        if (performance.now() / 1000 - verdictAtRef.current < VERDICT_GRACE) return
+        // Deliberately not SPACE. Space is the key you have been hammering for
+        // the last two minutes, and binding it here means the last twitch of
+        // your performance dismisses the verdict on that performance.
+        if (k === 'enter') { e.preventDefault(); encore() }
+        else if (k === 'escape') quit()
+        return
+      }
       if (screenRef.current !== 'play') return
       if (k === ' ') {
         e.preventDefault()
@@ -326,7 +404,7 @@ export default function Page() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [begin, quit, restart, takeStrike])
+  }, [begin, quit, restart, encore, takeStrike])
 
   // A backgrounded tab gets no video frames, so the follower would wake up to
   // a several-second gap and lurch. Put the instrument down instead.
@@ -362,6 +440,8 @@ export default function Page() {
       const { x, y } = canvasPoint(e)
       const i = menuRowAt(x, y, PIECES.length)
       begin(PIECES[i >= 0 ? i : selRef.current])
+    } else if (screenRef.current === 'verdict') {
+      if (performance.now() / 1000 - verdictAtRef.current >= VERDICT_GRACE) encore()
     } else if (screenRef.current === 'play') {
       const { x } = canvasPoint(e)
       takeStrike(performance.now() / 1000, 0.7, x < W / 2 ? 'L' : 'R')
@@ -391,7 +471,13 @@ export default function Page() {
         </div>
 
         <div className="deck">
-          {screen === 'play' ? (
+          {screen === 'verdict' ? (
+            <>
+              <button className="btn" onClick={quit}>&#9664; PIECES</button>
+              <button className="btn on" onClick={encore}>ENCORE &#9654;</button>
+              <span className="tag">THAT WAS A WHOLE PERFORMANCE</span>
+            </>
+          ) : screen === 'play' ? (
             <>
               <button className="btn" onClick={quit}>&#9664; PIECES</button>
               <button className="btn" onClick={restart}>RESTART</button>
@@ -425,8 +511,8 @@ export default function Page() {
 
       <p className="note">
         {screen === 'play' && piece
-          ? `${piece.composer} — ${piece.title}. Drop a hand to play a beat — each hand plays its own staff, and both together make a chord. Rest a hand and that staff falls back; take it out of frame and it stops. Lift both hands and the dampers come off, so everything rings. Extra taps between the beats come out as ornaments: nothing you do is ever silent. SPACE / Z / X = keystroke, A = auto, R = restart, D = meters, ESC = back.`
-          : 'Your hands are the hammers and the pedal. Every stroke plays the next beat, so the music follows your pace — speed up, drag your heels, stop dead. The cat has opinions.'}
+          ? `${piece.composer} — ${piece.title}. Drop a hand to play a beat — each hand plays its own staff, and both together make a chord. Rest a hand and that staff falls back; take it out of frame and it stops. Lift both hands and the dampers come off, so everything rings. Extra taps between the beats come out as ornaments: nothing you do is ever silent. It ends on its last chord — play it all the way through. SPACE / Z / X = keystroke, A = auto, R = restart, D = meters, ESC = back.`
+          : 'Your hands are the hammers and the pedal. Every stroke plays the next beat, so the music follows your pace — speed up, drag your heels, stop dead. Play a piece to its final chord and the cat will tell you what it thought.'}
       </p>
     </main>
   )

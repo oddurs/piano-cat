@@ -15,8 +15,19 @@ export type Expression = {
   twoHanded: boolean
 }
 
-export type StrikeKind = 'start' | 'beat' | 'chord' | 'ornament'
+export type StrikeKind = 'start' | 'beat' | 'chord' | 'ornament' | 'over'
 export type FiredNote = { p: number; vel: number; t: number; kind: 'note' | 'ornament' }
+
+/** What the performance was like, once there is a whole one to judge. */
+export type Report = {
+  steadiness: number   // 0..1, how even your pulse was
+  range: number        // 0..1, how much of the dynamic range you used
+  notes: number
+  strokes: number
+  bpm: number
+  grade: string
+  line: string         // what the cat makes of it
+}
 
 const DYN_MARKS: [number, string][] = [
   [0.10, 'ppp'], [0.20, 'pp'], [0.34, 'p'], [0.48, 'mp'],
@@ -80,6 +91,15 @@ export class Conductor {
   /** Have we ever seen both hands at once? Until we have, neither staff rests. */
   private everBoth = false
 
+  /**
+   * A performance ends. Looping forever is what a toy does; a piece that
+   * stops on its last chord is something you can finish, be judged on, and
+   * play again on purpose. Encore turns the wrap back on.
+   */
+  loop = false
+  finished = false
+  private tally = { strokes: 0, notes: 0, dynLo: 1, dynHi: 0, steadySum: 0, steadyN: 0 }
+
   intervals: number[] = []
   lastFired: FiredNote[] = []
   strikeFlash = 0
@@ -126,6 +146,8 @@ export class Conductor {
    * value says which way.
    */
   strike(now: number, strength: number, side: Side): StrikeKind {
+    if (this.finished) return 'over'
+    this.tally.strokes += 1
     this.hit[side] += (strength - this.hit[side]) * 0.55
     this.engage[side] = 1
     this.lastHand = side === 'L' ? -1 : 1
@@ -186,6 +208,14 @@ export class Conductor {
    *  mid-strike loses its wrap, and the piece goes quiet for good. */
   private advance(to: number) {
     if (to <= this.pos) return
+    // Stated as a bound rather than a crossing: once pos sits exactly on
+    // loopAt the floor has already ticked over, so a crossing test stops
+    // firing and the playhead walks straight off the end of the piece.
+    if (!this.loop && to >= this.piece.loopAt) {
+      this.pos = this.piece.loopAt
+      this.finished = true
+      return
+    }
     const was = Math.floor(this.pos / this.piece.loopAt)
     this.pos = to
     const now = Math.floor(this.pos / this.piece.loopAt)
@@ -287,8 +317,19 @@ export class Conductor {
     // beats always get distinct instants, however many got skipped — a fixed
     // spacing with a fixed cap used to pile a whole stroke of sixteenths onto
     // the same millisecond at WAVE 4.
+    this.tally.dynLo = Math.min(this.tally.dynLo, ex.dyn)
+    this.tally.dynHi = Math.max(this.tally.dynHi, ex.dyn)
+    if (this.intervals.length >= 3) {
+      this.tally.steadySum += this.unsteadiness
+      this.tally.steadyN += 1
+    }
+
     const head = this.playhead
     const due: NoteEv[] = []
+    if (this.finished) {
+      // the last chord is written past wherever the playhead stopped; play it
+      while (this.idx < this.notes.length) due.push(this.notes[this.idx++])
+    }
     if (this.pendingWrap > 0) {
       while (this.idx < this.notes.length) due.push(this.notes[this.idx++])
       this.idx = 0
@@ -352,6 +393,7 @@ export class Conductor {
     })
     this.lastOf[side] = n
     this.held[side] = []
+    this.tally.notes += 1
     this.lastFired.push({ p: n.p, vel, t: now, kind: 'note' })
   }
 
@@ -389,6 +431,36 @@ export class Conductor {
     this.ornamentFlash = 0
     this.phase = 0
     this.pedal = 0
+    this.finished = false
+    this.tally = { strokes: 0, notes: 0, dynLo: 1, dynHi: 0, steadySum: 0, steadyN: 0 }
+  }
+
+  /** How it went. Only meaningful once `finished`. */
+  get report(): Report {
+    const t = this.tally
+    const steadiness = clamp(1 - (t.steadyN ? t.steadySum / t.steadyN : 1), 0, 1)
+    const range = clamp(t.dynHi - t.dynLo, 0, 1)
+    const score = steadiness * 0.62 + range * 0.38
+
+    const [grade, line] =
+      score > 0.82 ? ['MAESTRO', 'the cat has never heard better'] :
+      score > 0.66 ? ['TASTEFUL', 'the cat approves, quietly'] :
+      score > 0.48 ? ['SPIRITED', 'the cat enjoyed that a great deal'] :
+      score > 0.3 ? ['RUBATO', 'the cat is calling it interpretation'] :
+      ['CHAOS', 'the cat would like to try that one again']
+
+    return {
+      steadiness, range, notes: t.notes, strokes: t.strokes,
+      bpm: this.bpm, grade, line,
+    }
+  }
+
+  /** Round again, from the top, keeping nothing but the tempo you found. */
+  encore() {
+    const period = this.period
+    this.reset()
+    this.period = period
+    this.finished = false
   }
 
   /** Notes played since the last call. Drained rather than cleared per frame

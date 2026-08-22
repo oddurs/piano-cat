@@ -285,6 +285,69 @@ export class Piano {
     this.bed?.set(travel, x, dyn, this.pedal)
   }
 
+  /**
+   * A room getting to its feet. A wash of filtered noise for the crowd, with
+   * discrete claps scattered over it so it reads as people rather than static.
+   * The piece has to be able to end before this is worth having, and the
+   * ending is worth very little without it.
+   */
+  applaud(seconds = 3.4) {
+    if (!this.ready) return
+    const now = this.ctx.currentTime
+
+    const wash = this.ctx.createBufferSource()
+    wash.buffer = this.noise
+    wash.loop = true
+    const bp = this.ctx.createBiquadFilter()
+    bp.type = 'bandpass'
+    bp.frequency.value = 1800
+    bp.Q.value = 0.8
+    const wg = this.ctx.createGain()
+    wg.gain.setValueAtTime(0.0002, now)
+    wg.gain.exponentialRampToValueAtTime(0.09, now + 0.35)
+    wg.gain.setValueAtTime(0.09, now + seconds * 0.4)
+    wg.gain.exponentialRampToValueAtTime(0.0002, now + seconds)
+    wash.connect(bp); bp.connect(wg); wg.connect(this.master)
+    wash.start(now)
+    wash.stop(now + seconds + 0.1)
+
+    for (let i = 0; i < 26; i++) {
+      // clustered early, thinning out — nobody claps in time
+      const at = now + Math.pow(Math.random(), 0.55) * seconds * 0.9
+      const c = this.ctx.createBufferSource()
+      c.buffer = this.noise
+      c.playbackRate.value = 0.8 + Math.random() * 0.6
+      const hp = this.ctx.createBiquadFilter()
+      hp.type = 'bandpass'
+      hp.frequency.value = 1200 + Math.random() * 2200
+      hp.Q.value = 1.2
+      const g = this.ctx.createGain()
+      const peak = 0.02 + Math.random() * 0.03
+      g.gain.setValueAtTime(peak, at)
+      g.gain.exponentialRampToValueAtTime(0.0001, at + 0.07)
+      const pan = this.ctx.createStereoPanner()
+      pan.pan.value = (Math.random() - 0.5) * 1.4
+      c.connect(hp); hp.connect(g); g.connect(pan); pan.connect(this.master)
+      c.start(at)
+      c.stop(at + 0.1)
+    }
+  }
+
+  /** A wood-block tick for the count-in. Someone has to set the tempo first. */
+  tick(accent: boolean) {
+    if (!this.ready) return
+    const now = this.ctx.currentTime
+    const o = this.ctx.createOscillator()
+    o.type = 'square'
+    o.frequency.value = accent ? 1150 : 780
+    const g = this.ctx.createGain()
+    g.gain.setValueAtTime(accent ? 0.09 : 0.055, now)
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.05)
+    o.connect(g); g.connect(this.master)
+    o.start(now)
+    o.stop(now + 0.06)
+  }
+
   private evict() {
     while (this.voices.length >= MAX_VOICES) {
       const oldest = this.voices.reduce((a, b) => (a.born <= b.born ? a : b))
