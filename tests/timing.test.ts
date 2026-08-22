@@ -27,9 +27,13 @@ function maxChord(piece: Piece) {
 
 type Hit = { t: number; side: Side }
 
-function run(piece: Piece, strikes: Hit[], opts: { strideAt?: [number, number][] } = {}) {
+function run(piece: Piece, strikes: Hit[], opts: { strideAt?: [number, number][]; loop?: boolean } = {}) {
   const piano = fakePiano()
   const con = new Conductor(piece, piano as any)
+  // These properties describe the follower in continuous motion, so they are
+  // stated against a piece that keeps going. The ones that must hold whatever
+  // mode you are in are asserted separately, below, in both.
+  con.loop = opts.loop !== false
   let T = 0
   let si = 0
   let maxTogether = 0     // notes sharing one scheduled instant
@@ -99,8 +103,10 @@ for (const piece of PIECES) {
     )
   })
 
-  test(`${piece.id}: the playhead never rewinds`, () => {
-    assert.equal(run(piece, steady(24, p0)).backwards, 0)
+  test(`${piece.id}: the playhead never rewinds, looping or not`, () => {
+    // Not a fact about looping — a fact about music. It holds in both modes.
+    assert.equal(run(piece, steady(24, p0), { loop: true }).backwards, 0)
+    assert.equal(run(piece, steady(24, p0), { loop: false }).backwards, 0)
   })
 
   test(`${piece.id}: holds the tempo it was given`, () => {
@@ -208,4 +214,72 @@ test('a big early strike is a flourish at any beats-per-wave, never a clump', ()
       `WAVE ${stride}: the flourish spilled past a single gesture`,
     )
   }
+})
+
+
+// ------------------------------------------------------------- the ending
+
+test('a performance ends at the last bar instead of wrapping', () => {
+  for (const piece of PIECES) {
+    const p = 60 / piece.pulseBpm
+    const r = run(piece, steady(piece.loopAt + 4, p), { loop: false })
+    assert.ok(r.con.finished, `${piece.id} never finished`)
+    assert.ok(
+      r.con.pos <= piece.loopAt + 1e-9,
+      `${piece.id} ran past its own ending: ${r.con.pos} > ${piece.loopAt}`,
+    )
+    assert.equal(r.con.loops, 0, `${piece.id} should not have looped`)
+  }
+})
+
+test('the piece plays its final chord before it stops', () => {
+  for (const piece of PIECES) {
+    const p = 60 / piece.pulseBpm
+    const r = run(piece, steady(piece.loopAt + 4, p), { loop: false })
+    const last = Math.max(...piece.notes.map((n) => n.b))
+    for (const n of piece.notes.filter((n) => n.b === last)) {
+      assert.ok(
+        r.piano.played.some((x) => x.midi === n.p),
+        `${piece.id}: final note ${n.p} never sounded`,
+      )
+    }
+  }
+})
+
+test('once it is over, waving does nothing', () => {
+  const r = run(bach, steady(bach.loopAt + 4, p0), { loop: false })
+  const before = r.piano.played.length
+  assert.equal(r.con.strike(999, 0.8, 'R'), 'over')
+  r.con.update(DT, 999, EX)
+  assert.equal(r.piano.played.length, before, 'a finished piece must stay finished')
+})
+
+test('an encore starts over but keeps the tempo you found', () => {
+  const r = run(bach, steady(bach.loopAt + 4, p0 * 0.75), { loop: false })
+  const tempo = r.con.bpm
+  assert.ok(r.con.finished)
+  r.con.encore()
+  assert.equal(r.con.finished, false)
+  assert.equal(r.con.pos, 0, 'an encore starts from the top')
+  assert.ok(Math.abs(r.con.bpm - tempo) < 1e-6, 'and at the pace you were already playing')
+})
+
+test('the verdict reflects how it was actually played', () => {
+  const steadyRun = run(bach, steady(bach.loopAt + 4, p0), { loop: false })
+  let t = 0
+  const sloppy: Hit[] = [{ t, side: 'L' }]
+  for (let i = 0; i < bach.loopAt + 4; i++) {
+    t += p0 * (0.6 + rnd() * 0.8)
+    sloppy.push({ t, side: i % 2 ? 'L' : 'R' })
+  }
+  const sloppyRun = run(bach, sloppy, { loop: false })
+
+  assert.ok(
+    steadyRun.con.report.steadiness > sloppyRun.con.report.steadiness,
+    `metronomic ${steadyRun.con.report.steadiness.toFixed(2)} should beat ` +
+    `shambolic ${sloppyRun.con.report.steadiness.toFixed(2)}`,
+  )
+  assert.ok(steadyRun.con.report.notes > 0)
+  assert.ok(steadyRun.con.report.strokes > 0)
+  assert.ok(steadyRun.con.report.grade.length > 0)
 })

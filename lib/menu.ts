@@ -1,5 +1,6 @@
 import type { Px } from './px'
 import type { Piece } from './pieces'
+import type { Report } from './conductor'
 import { drawCatBody, drawCandelabra, type CatState } from './cat'
 
 export const MW = 320
@@ -8,6 +9,19 @@ export const MH = 180
 const ROW_TOP = 52
 const ROW_H = 17
 const KEYS_TOP = 158
+
+/** greedy word wrap to a pixel width — the pixel font has no ellipsis and
+ *  nothing here is short enough to trust */
+function wrap(px: Px, text: string, width: number): string[] {
+  const lines: string[] = ['']
+  for (const w of text.split(' ')) {
+    const last = lines[lines.length - 1]
+    const test = last ? `${last} ${w}` : w
+    if (px.textW(test) > width) lines.push(w)
+    else lines[lines.length - 1] = test
+  }
+  return lines
+}
 
 /** which piece row is under a canvas-space point, or -1 */
 export function menuRowAt(x: number, y: number, count: number) {
@@ -86,12 +100,7 @@ export function drawMenu(px: Px, o: {
   })
 
   // --- blurb for the highlighted piece
-  const words = p.blurb.split(' ')
-  const lines: string[] = ['']
-  for (const w of words) {
-    const test = lines[lines.length - 1] ? `${lines[lines.length - 1]} ${w}` : w
-    if (px.textW(test) > MW - 40) lines.push(w); else lines[lines.length - 1] = test
-  }
+  const lines = wrap(px, p.blurb, MW - 40)
   lines.slice(0, 2).forEach((l, i) => px.a(0.9).textC(l, MW / 2, 124 + i * 10, p.accent))
   px.reset
 
@@ -182,4 +191,53 @@ export function drawCalibrate(px: Px, o: {
   for (let i = 0; i < n; i++) {
     px.r(30 + i * w, by + bh + 24, w - 1, 6, (1 - o.left) * n > i ? o.accent : '#2b2440')
   }
+}
+
+/**
+ * The verdict. A performance that just stops has not ended, it has been
+ * abandoned — this is the part that makes finishing mean something, and the
+ * part that makes you want to go again.
+ */
+export function drawVerdict(px: Px, o: {
+  t: number; piece: Piece; report: Report; take: number
+}) {
+  const { report: r, piece: p } = o
+  drawBackdrop(px, o.t, p.accent)
+
+  px.a(0.9).r(24, 18, MW - 48, MH - 46, '#0f0c1a')
+  px.reset
+  px.panel(24, 18, MW - 48, MH - 46, '#151123', px.mix(p.accent2, '#ffffff', .3), '#08060f')
+
+  px.textCS(r.grade, MW / 2, 26, '#ffffff', p.accent2, 16, 2)
+  // the cat is not concise and the card is 272px wide
+  const said = wrap(px, r.line, MW - 72)
+  said.slice(0, 2).forEach((l, i) => px.a(0.85).textC(l, MW / 2, 48 + i * 10, p.accent))
+  px.reset
+  const top = said.length > 1 ? 74 : 68
+
+  const bar = (label: string, v: number, y: number) => {
+    px.text(label, 40, y, '#8a83aa')
+    const w = 132
+    px.r(112, y + 1, w, 6, '#241d33')
+    px.r(112, y + 1, Math.round(w * v), 6, p.accent)
+    px.textR(`${Math.round(v * 100)}`, MW - 40, y, '#cfc7ee')
+  }
+  bar('STEADY', r.steadiness, top)
+  bar('DYNAMICS', r.range, top + 14)
+
+  const facts = [
+    `${r.notes} NOTES`,
+    `${r.strokes} STROKES`,
+    `${Math.round(r.bpm)} BPM`,
+    `TAKE ${o.take}`,
+  ]
+  facts.forEach((f, i) => {
+    const x = 40 + (i % 2) * 118
+    px.a(0.75).text(f, x, top + 34 + Math.floor(i / 2) * 11, '#8a83aa')
+  })
+  px.reset
+
+  px.a(0.7 + Math.sin(o.t * 4) * 0.3)
+    .textC('ENTER = ENCORE      ESC = PIECES', MW / 2, MH - 20, '#cfc7ee')
+  px.reset
 }

@@ -60,7 +60,8 @@ function fakeHands(t, dyn, tracked, height) {
 const mute = { play() {}, thud() {}, stir() {}, setPedal() {}, setResonance() {} }
 
 function play(idx, seconds, o) {
-  const { dyn, mood, vibe, hint = '', tracked = false, height = 0.5, debug = null } = o
+  const { dyn, mood, vibe, hint = '', tracked = false, height = 0.5, debug = null,
+    countIn = null, over = false } = o
   const piece = PIECES[idx]
   const con = new Conductor(piece, mute)
   const cv = createCanvas(W, H)
@@ -84,7 +85,7 @@ function play(idx, seconds, o) {
       ...fakeCam(T, dyn),
     }
     for (const n of con.drain()) ren.noteFired(n.p, n.vel, piece.accent, n.kind === 'ornament')
-    ren.draw(con, frame, DT, mood, { auto: false, vibe, hint, debug })
+    ren.draw(con, frame, DT, mood, { auto: false, vibe, hint, debug, countIn, over })
     T += DT
   }
   return cv
@@ -140,6 +141,16 @@ sheet('tracking', [
   }),
   // no hands seen at all: the fallback look, with the prompt showing
   play(1, 4.0, { dyn: .35, mood: 'calm', vibe: 'SPIRITED', hint: 'SHOW ME YOUR HANDS' }),
+])
+const REPORTS = {
+  good: { steadiness: .88, range: .71, notes: 412, strokes: 80, bpm: 61, grade: 'MAESTRO', line: 'the cat has never heard better' },
+  bad: { steadiness: .19, range: .12, notes: 388, strokes: 96, bpm: 143, grade: 'CHAOS', line: 'the cat would like to try that one again' },
+}
+sheet('arc', [
+  play(0, 6.4, { dyn: .3, mood: 'calm', vibe: 'TASTEFUL', tracked: true, height: .4, countIn: 3 }),
+  play(3, 6.4, { dyn: .5, mood: 'happy', vibe: 'MAESTRO', tracked: true, height: .7, over: true }),
+  screen((px) => M.drawVerdict(px, { t: 1.1, piece: PIECES[0], report: REPORTS.good, take: 1 })),
+  screen((px) => M.drawVerdict(px, { t: 2.3, piece: PIECES[1], report: REPORTS.bad, take: 4 })),
 ])
 sheet('menu', [
   screen((px) => M.drawMenu(px, { pieces: PIECES, sel: 0, t: 1.2, camWarn: null })),

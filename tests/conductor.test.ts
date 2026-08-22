@@ -138,6 +138,7 @@ test('the loop seam does not swallow the end of the take', () => {
   // idx used to reset at the wrap, so notes between the last one played and
   // the loop point were never heard — a hole at the top of every repeat.
   const { piano, con } = rig(PIECES[3])
+  con.loop = true
   const last = Math.max(...PIECES[3].notes.map((n) => n.b))
   const tail = PIECES[3].notes.filter((n) => n.b === last)
   let t = 0
@@ -185,6 +186,7 @@ test('both staves play when there are no hands to hold back', () => {
 
 test('the take loops without dropping notes', () => {
   const { piano, con } = rig(PIECES[3])
+  con.loop = true
   let t = 0
   while (con.loops < 2 && t < 200) {
     con.strike(t, 0.7, 'R')
