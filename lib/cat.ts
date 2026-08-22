@@ -129,8 +129,14 @@ export function drawCatBody(px: Px, s: CatState) {
     px.r(hx - 3, y + 2, 3, 5, '#8fd6ff')
   }
   if (mood === 'happy' && Math.sin(s.t * 3) > 0.2) {
-    px.r(cx + 22, y + 2, 2, 7, '#fff8c4')
-    px.r(cx + 22, y + 8, 4, 3, '#fff8c4')
+    // A beamed pair. The old glyph was a stem with a foot on the bottom left,
+    // which is a capital L — noteheads and a beam are what make it read as
+    // music at the size this is actually seen.
+    px.r(cx + 21, y + 9, 3, 3, '#fff8c4')     // noteheads
+    px.r(cx + 28, y + 8, 3, 3, '#fff8c4')
+    px.r(cx + 23, y + 2, 1, 8, '#fff8c4')     // stems, up the right of each
+    px.r(cx + 30, y + 1, 1, 8, '#fff8c4')
+    px.r(cx + 23, y + 1, 8, 2, '#fff8c4')     // beam
   }
 }
 

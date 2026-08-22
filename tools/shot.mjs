@@ -111,8 +111,19 @@ function sheet(name, cvs) {
   console.log('wrote', path.relative(root, path.join(out, `${name}.png`)))
 }
 
+// Panel times are chosen, not arbitrary: the last frame rendered is the one
+// you see, so art behind a time gate is only in the sheet if the gate happens
+// to be open at that t. Two were closed at every time originally sampled here
+// — the cat's happy note (sin(t*3) > 0.2) and, on the loading screen, its open
+// eyes (sin(t*2.2) > -0.9, shut for only ~10% of the cycle and we landed in it
+// every time). Neither had ever appeared in a review sheet.
+//
+// The check that finds these is cheap and needs no tooling: grep every Math.sin
+// in a file with conditional art and ask of each one whether it can hide art
+// entirely or only move it. Offsets and alphas are fine; comparisons are not.
+// Do it whenever you add time-gated art, and pick a t here that turns it on.
 sheet('play', [
-  play(0, 6.2, { dyn: .55, mood: 'happy', vibe: 'TASTEFUL', tracked: true, height: .35 }),
+  play(0, 6.4, { dyn: .55, mood: 'happy', vibe: 'TASTEFUL', tracked: true, height: .35 }),
   play(1, 9.5, { dyn: .92, mood: 'wild', vibe: 'CHAOS', tracked: true, height: .85 }),
   play(2, 22, { dyn: .28, mood: 'calm', vibe: 'MAESTRO' }),
   play(3, 3.0, { dyn: .04, mood: 'sleep', vibe: 'ZZZ', hint: 'the cat is waiting' }),
@@ -123,7 +134,7 @@ sheet('tracking', [
   // hands high: dampers lifted, the pedal meter open
   play(0, 5.0, { dyn: .5, mood: 'happy', vibe: 'TASTEFUL', tracked: true, height: .95 }),
   // the debug meters, which are easy to let drift over the playfield
-  play(2, 6.0, {
+  play(2, 6.4, {
     dyn: .6, mood: 'happy', vibe: 'MAESTRO', tracked: true, height: .6,
     debug: { fps: 58, p50: 21, p95: 34, mode: 'HANDS' },
   }),
@@ -133,7 +144,9 @@ sheet('tracking', [
 sheet('menu', [
   screen((px) => M.drawMenu(px, { pieces: PIECES, sel: 0, t: 1.2, camWarn: null })),
   screen((px) => M.drawMenu(px, { pieces: PIECES, sel: 2, t: 3.4, camWarn: null })),
-  screen((px) => M.drawLoading(px, { t: 2.1, status: 'warming up the piano...', done: .45 })),
+  // t chosen so the cat's eyes are open — the normal state, and the one that
+  // had never once been rendered into a sheet
+  screen((px) => M.drawLoading(px, { t: 2.4, status: 'warming up the piano...', done: .45 })),
   screen((px) => M.drawMenu(px, { pieces: PIECES, sel: 3, t: 5.0, camWarn: 'NO CAMERA - USE SPACE' })),
   screen((px) => M.drawCalibrate(px, {
     t: 1.4, left: .45, accent: PIECES[0].accent,

@@ -76,6 +76,9 @@ export class Conductor {
   engage: Record<Side, number> = { L: 1, R: 1 }
   private held: Record<Side, NoteEv[]> = { L: [], R: [] }
   private lastOf: Partial<Record<Side, NoteEv>> = {}
+  private pendingWrap = 0
+  /** Have we ever seen both hands at once? Until we have, neither staff rests. */
+  private everBoth = false
 
   intervals: number[] = []
   lastFired: FiredNote[] = []
@@ -185,10 +188,12 @@ export class Conductor {
     if (to <= this.pos) return
     const was = Math.floor(this.pos / this.piece.loopAt)
     this.pos = to
-    if (Math.floor(this.pos / this.piece.loopAt) !== was) {
-      this.idx = 0
-      this.loops += 1
-    }
+    const now = Math.floor(this.pos / this.piece.loopAt)
+    // Only record that a wrap is owed. Resetting the note cursor here dropped
+    // whatever was left of the take between the last note played and the loop
+    // point — a small hole at the top of every repeat. update() has the
+    // context to actually play those before starting again.
+    if (now !== was) this.pendingWrap += now - was
   }
 
   /** A flourish between the beats: a note from this staff, light and quick. */
@@ -244,8 +249,12 @@ export class Conductor {
 
     // How much of each hand is in the performance. A hand you are holding
     // still rests; a hand that has left the frame stops playing altogether.
+    // A staff only rests once you have shown us the hand that plays it. Play
+    // one-handed all session and you still get the whole piece; put a second
+    // hand up once and from then on taking it away means something.
+    if (ex.present.L && ex.present.R) this.everBoth = true
     for (const s of SIDES) {
-      const floor = !ex.twoHanded ? 1 : ex.present[s] ? GHOST : 0
+      const floor = !ex.twoHanded || !this.everBoth ? 1 : ex.present[s] ? GHOST : 0
       this.engage[s] += (floor - this.engage[s]) * lerpRate(dt, 1.3)
     }
 
@@ -280,6 +289,13 @@ export class Conductor {
     // the same millisecond at WAVE 4.
     const head = this.playhead
     const due: NoteEv[] = []
+    if (this.pendingWrap > 0) {
+      while (this.idx < this.notes.length) due.push(this.notes[this.idx++])
+      this.idx = 0
+      this.loops += this.pendingWrap
+      this.pendingWrap = 0
+      this.held = { L: [], R: [] }
+    }
     while (this.idx < this.notes.length && this.notes[this.idx].b <= head + 1e-6) {
       due.push(this.notes[this.idx++])
     }
@@ -339,6 +355,20 @@ export class Conductor {
     this.lastFired.push({ p: n.p, vel, t: now, kind: 'note' })
   }
 
+  /**
+   * Come back after the tab was hidden. No video arrives while you are away,
+   * so the follower would wake to a several-second gap and lurch; this puts
+   * the beat under the playhead where it already is. It deliberately keeps
+   * your take, your tempo and your place — losing those to an alt-tab was
+   * punishing something that isn't a mistake.
+   */
+  reanchor(now: number) {
+    if (!this.started) return
+    this.lastStrikeAt = now
+    this.beatOrigin = this.pos
+    this.phase = 0
+  }
+
   reset() {
     this.idx = 0
     this.pos = 0
@@ -352,6 +382,13 @@ export class Conductor {
     this.engage = { L: 1, R: 1 }
     this.held = { L: [], R: [] }
     this.lastOf = {}
+    this.pendingWrap = 0
+    this.everBoth = false
+    this.hit = { L: 0.6, R: 0.6 }
+    this.strikeFlash = 0
+    this.ornamentFlash = 0
+    this.phase = 0
+    this.pedal = 0
   }
 
   /** Notes played since the last call. Drained rather than cleared per frame

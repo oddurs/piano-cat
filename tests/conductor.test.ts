@@ -83,8 +83,15 @@ test('two hands within a moment of each other are a chord, not two beats', () =>
 
 test('a hand that leaves the instrument stops playing its staff', () => {
   const { piano, con } = rig()
+  const both = ex({ present: { L: true, R: true }, twoHanded: true })
   const gone = ex({ present: { L: false, R: true }, twoHanded: true })
   let t = 0
+  // play with both hands first — a staff only rests once we have seen the
+  // hand that plays it, so there is something to take away
+  for (let i = 0; i < 2; i++) {
+    con.strike(t, 0.7, i % 2 ? 'L' : 'R')
+    for (let k = 0; k < 30; k++) { t += 1 / 60; con.update(1 / 60, t, both) }
+  }
   for (let i = 0; i < 8; i++) {
     con.strike(t, 0.7, 'R')
     for (let k = 0; k < 30; k++) { t += 1 / 60; con.update(1 / 60, t, gone) }
@@ -105,6 +112,64 @@ test('a hand that leaves the instrument stops playing its staff', () => {
   assert.ok(leftOnly.size > 0, 'the piece should have some left-hand-only pitches')
   assert.equal(late.filter((p) => leftOnly.has(p.midi)).length, 0, 'no bass should sound with no left hand')
   assert.ok(late.length > 0, 'the melody should carry on')
+})
+
+test('playing one-handed all along still gets you the whole piece', () => {
+  // The bass staff is gated on the left hand. Somebody who only ever waves one
+  // hand has not put a hand down — they have never picked one up — and taking
+  // half the music away from them is a punishment for a thing they did not do.
+  const { piano, con } = rig()
+  const oneHand = ex({ present: { L: false, R: true }, twoHanded: true })
+  let t = 0
+  for (let i = 0; i < 10; i++) {
+    con.strike(t, 0.7, 'R')
+    for (let k = 0; k < 30; k++) { t += 1 / 60; con.update(1 / 60, t, oneHand) }
+  }
+  const right = new Set(bach.notes.filter((n) => n.h === 1).map((n) => n.p))
+  const leftOnly = new Set(bach.notes.filter((n) => n.h === -1 && !right.has(n.p)).map((n) => n.p))
+  assert.ok(con.engage.L > 0.9, `left staff should stay engaged, was ${con.engage.L}`)
+  assert.ok(
+    piano.played.some((p) => leftOnly.has(p.midi)),
+    'the bass line should still be playing',
+  )
+})
+
+test('the loop seam does not swallow the end of the take', () => {
+  // idx used to reset at the wrap, so notes between the last one played and
+  // the loop point were never heard — a hole at the top of every repeat.
+  const { piano, con } = rig(PIECES[3])
+  const last = Math.max(...PIECES[3].notes.map((n) => n.b))
+  const tail = PIECES[3].notes.filter((n) => n.b === last)
+  let t = 0
+  while (con.loops < 1 && t < 120) {
+    con.strike(t, 0.7, 'R')
+    const p = con.period
+    for (let k = 0; k < 30; k++) { t += p / 30; con.update(p / 30, t, ex()) }
+  }
+  assert.equal(con.loops, 1)
+  for (const n of tail) {
+    assert.ok(
+      piano.played.some((p) => p.midi === n.p),
+      `the final chord note ${n.p} was skipped at the loop seam`,
+    )
+  }
+})
+
+test('coming back from a hidden tab keeps your take and your tempo', () => {
+  const { con } = rig()
+  let t = 0
+  for (let i = 0; i < 6; i++) {
+    con.strike(t, 0.7, i % 2 ? 'L' : 'R')
+    t += con.period
+    con.update(1 / 60, t, ex())
+  }
+  const was = { pos: con.pos, loops: con.loops, bpm: con.bpm }
+  con.reanchor(t + 40)            // forty seconds in another tab
+  con.update(1 / 60, t + 40, ex())
+  assert.equal(con.loops, was.loops, 'the take number survives')
+  assert.ok(con.pos >= was.pos, 'the playhead does not rewind')
+  assert.ok(Math.abs(con.bpm - was.bpm) < 1e-6, 'the tempo survives')
+  assert.ok(con.pos - was.pos < 1, 'and it does not lurch forward on return')
 })
 
 test('both staves play when there are no hands to hold back', () => {
