@@ -61,7 +61,7 @@ const mute = { play() {}, thud() {}, stir() {}, setPedal() {}, setResonance() {}
 
 function play(idx, seconds, o) {
   const { dyn, mood, vibe, hint = '', tracked = false, height = 0.5, debug = null,
-    countIn = null, over = false } = o
+    countIn = null, over = false, react = null } = o
   const piece = PIECES[idx]
   const con = new Conductor(piece, mute)
   const cv = createCanvas(W, H)
@@ -84,6 +84,9 @@ function play(idx, seconds, o) {
       energy: .05 * dyn, dyn, wild: .15, height, spread: .5, travel: dyn * .6,
       ...fakeCam(T, dyn),
     }
+    // force a face for the review sheet — these are transient by nature and
+    // would otherwise never be sampled
+    if (react) con.reaction = { kind: react, age: 0.25 }
     for (const n of con.drain()) ren.noteFired(n.p, n.vel, piece.accent, n.kind === 'ornament')
     ren.draw(con, frame, DT, mood, { auto: false, vibe, hint, debug, countIn, over })
     T += DT
@@ -151,6 +154,12 @@ sheet('arc', [
   play(3, 6.4, { dyn: .5, mood: 'happy', vibe: 'MAESTRO', tracked: true, height: .7, over: true }),
   screen((px) => M.drawVerdict(px, { t: 1.1, piece: PIECES[0], report: REPORTS.good, take: 1 })),
   screen((px) => M.drawVerdict(px, { t: 2.3, piece: PIECES[1], report: REPORTS.bad, take: 4 })),
+])
+sheet('faces', [
+  play(0, 6.4, { dyn: .5, mood: 'calm', vibe: 'TASTEFUL', tracked: true, height: .6, react: 'stumble' }),
+  play(0, 6.4, { dyn: .5, mood: 'calm', vibe: 'MAESTRO', tracked: true, height: .6, react: 'nailed' }),
+  play(1, 6.4, { dyn: .8, mood: 'calm', vibe: 'SPIRITED', tracked: true, height: .3, react: 'startled' }),
+  play(3, 6.4, { dyn: .3, mood: 'calm', vibe: 'MAESTRO', tracked: true, height: .9, react: 'bow', over: true }),
 ])
 sheet('menu', [
   screen((px) => M.drawMenu(px, { pieces: PIECES, sel: 0, t: 1.2, camWarn: null })),

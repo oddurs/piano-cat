@@ -105,9 +105,12 @@ export class Renderer {
     this.nextBlink -= dt
     if (this.nextBlink <= 0) this.blink = 0.12
 
+    const react = con.reaction
     const cat: CatState = {
       cx: W / 2, headTop: 42, phase: con.started ? con.phase : 0, pos: con.pos,
       dyn: frame.dyn, mood, t: this.t, blinkOpen: this.blink <= 0, strike: con.strikeFlash,
+      react,
+      pedal: con.pedal,
     }
     drawCatBody(px, cat)
     drawCandelabra(px, 24, FALL_TOP + 2, this.t)
