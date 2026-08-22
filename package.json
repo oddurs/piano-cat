@@ -1,0 +1,50 @@
+{
+  "name": "piano-cat",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mime a classical masterpiece at your webcam. Every stroke of your hands plays the next beat, so the music follows your pace. Pixel cat, real grand piano.",
+  "homepage": "https://oddurs.github.io/piano-cat/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oddurs/piano-cat.git"
+  },
+  "bugs": {
+    "url": "https://github.com/oddurs/piano-cat/issues"
+  },
+  "license": "MIT",
+  "author": "Oddur Sigurdsson <oddurs@gmail.com>",
+  "keywords": [
+    "webcam",
+    "motion-tracking",
+    "web-audio",
+    "piano",
+    "pixel-art",
+    "canvas",
+    "music",
+    "toy",
+    "nextjs"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "next dev -p 9393",
+    "build": "next build",
+    "preview": "npx --yes serve out -l 9393",
+    "typecheck": "tsc --noEmit",
+    "test": "node tools/sim.mjs",
+    "shot": "node tools/shot.mjs"
+  },
+  "dependencies": {
+    "next": "^16.3.2",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@napi-rs/canvas": "^1.0.7",
+    "@types/node": "^26.2.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "typescript": "^7.0.2"
+  }
+}

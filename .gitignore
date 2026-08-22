@@ -1,0 +1,26 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.*
+
+# next
+/.next/
+/out/
+*.tsbuildinfo
+
+# headless render output (npm run shot)
+/.shots/
+
+# env
+.env*.local
+
+# os / editor
+.DS_Store
+*.pem
+.vscode/
+.idea/
+
+# logs
+npm-debug.log*
+yarn-error.log*
+.npm
