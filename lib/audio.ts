@@ -198,64 +198,117 @@ export class Piano {
 
   play(s: Strike) {
     if (!this.ready) return
-    const now = this.ctx.currentTime
-    const at = now + Math.max(0, s.at ?? 0)
+    const at = this.ctx.currentTime + Math.max(0, s.at ?? 0)
+    this.stopVoice(s.midi, 0.03)
+    this.evict()
+    const v = this.voice(this.ctx, s, at, [this.dry, this.wet])
+    this.voices.push(v)
+    v.src.onended = () => {
+      const i = this.voices.indexOf(v)
+      if (i >= 0) this.voices.splice(i, 1)
+    }
+  }
+
+  /**
+   * One note, built the same way whether it is going to a speaker or to an
+   * offline render for measurement. There is one recording per pitch and no
+   * more — the multi-velocity Salamander set is a gigabyte and there is no
+   * redistributable mp3 mirror of it — so everything that separates a
+   * fortissimo from a pianissimo has to be modelled here rather than played
+   * back. Four things do most of that work, and none of them is volume:
+   *
+   *   the hammer is faster, so the attack is shorter;
+   *   the string is driven harder, so there are more partials up top;
+   *   those partials die before the fundamental does, so the note darkens as
+   *     it rings, and darkens sooner when it was struck harder;
+   *   and something physically knocks, which is the part a filter can never
+   *     fake and the part that makes a loud note sound *struck*.
+   */
+  private voice(ctx: BaseAudioContext, s: Strike, at: number, dests: AudioNode[]) {
     const vel = Math.max(0.03, Math.min(1, s.vel))
 
-    // pick the nearest sampled note and pitch-shift the rest of the way
     let best = this.samples[0]
     for (const smp of this.samples) {
       if (Math.abs(smp.midi - s.midi) < Math.abs(best.midi - s.midi)) best = smp
     }
 
-    this.stopVoice(s.midi, 0.03)
-    this.evict()
-
-    const src = this.ctx.createBufferSource()
+    const src = ctx.createBufferSource()
     src.buffer = best.buf
     src.playbackRate.value = Math.pow(2, (s.midi - best.midi) / 12)
 
-    // Hammer brightness: pianissimo is felt and dark, fortissimo is edged.
-    const tone = this.ctx.createBiquadFilter()
+    // Brightness at the moment of the strike, falling away as it rings.
+    // Stated in octaves rather than in hertz: a linear sweep put almost all
+    // of its travel below mezzo-forte and then plateaued, so the whole upper
+    // half of the range — where anyone actually plays — got louder without
+    // getting brighter, which is the definition of a volume knob.
+    const open = 520 * Math.pow(2, vel * 4.4)
+    const tone = ctx.createBiquadFilter()
     tone.type = 'lowpass'
-    tone.frequency.value = 480 + Math.pow(vel, 1.5) * 11000
-    tone.Q.value = 0.4
+    tone.Q.value = 0.5
+    tone.frequency.setValueAtTime(open, at)
+    tone.frequency.exponentialRampToValueAtTime(
+      Math.max(260, open * 0.3), at + 1.4 - vel * 0.7,
+    )
 
-    const gain = this.ctx.createGain()
+    // a tilt rather than a wall: hard hammers lift the top, soft ones drop it
+    const tilt = ctx.createBiquadFilter()
+    tilt.type = 'highshelf'
+    tilt.frequency.value = 1400
+    tilt.gain.value = -9 + vel * 19
+
+    const gain = ctx.createGain()
     const peak = Math.pow(vel, 1.6) * 0.9
+    const attack = 0.013 - vel * 0.009
     gain.gain.setValueAtTime(0.0001, at)
-    gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), at + 0.006)
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), at + attack)
 
-    const pan = this.ctx.createStereoPanner()
+    const pan = ctx.createStereoPanner()
     pan.pan.value = Math.max(-1, Math.min(1, s.pan))
 
-    src.connect(tone); tone.connect(gain); gain.connect(pan)
-    pan.connect(this.dry); pan.connect(this.wet)
+    src.connect(tone); tone.connect(tilt); tilt.connect(gain); gain.connect(pan)
+    for (const d of dests) pan.connect(d)
     src.start(at)
 
-    // Let it ring for its written length, then damp — unless the pedal is
-    // down, in which case it rings until it dies or you drop your hands.
+    // the knock. Quiet, brief, and the reason a forte reads as a blow
+    if (vel > 0.3 && this.noise) {
+      const k = ctx.createBufferSource()
+      k.buffer = this.noise
+      k.playbackRate.value = 1.4 + vel
+      const kf = ctx.createBiquadFilter()
+      kf.type = 'bandpass'
+      kf.frequency.value = 900 + vel * 2600
+      kf.Q.value = 0.8
+      const kg = ctx.createGain()
+      const kp = Math.pow(vel - 0.3, 2) * 0.09
+      kg.gain.setValueAtTime(kp, at)
+      kg.gain.exponentialRampToValueAtTime(0.00005, at + 0.035)
+      k.connect(kf); kf.connect(kg); kg.connect(pan)
+      k.start(at)
+      k.stop(at + 0.06)
+    }
+
     const held = this.pedalDown
     const hold = held ? PEDAL_TAIL : Math.max(0.18, s.dur * 1.35)
     const rel = held ? PEDAL_TAIL : Math.max(0.08, s.release)
     if (held) {
       gain.gain.exponentialRampToValueAtTime(0.0002, at + PEDAL_TAIL)
     } else {
-      gain.gain.setValueAtTime(Math.max(0.0002, peak * 0.55), at + hold)
+      // a hard strike sheds its first energy faster; a soft one just sits
+      gain.gain.setValueAtTime(Math.max(0.0002, peak * (0.62 - vel * 0.16)), at + hold)
       gain.gain.exponentialRampToValueAtTime(0.0001, at + hold + rel)
     }
     const stopAt = held ? at + PEDAL_TAIL + 0.05 : at + hold + rel + 0.05
     src.stop(stopAt)
 
-    const v: Voice = {
-      gain, src, midi: s.midi, born: at, peak,
-      dampAt: at + hold, stopAt, pedalled: held,
-    }
-    this.voices.push(v)
-    src.onended = () => {
-      const i = this.voices.indexOf(v)
-      if (i >= 0) this.voices.splice(i, 1)
-    }
+    return { gain, src, midi: s.midi, born: at, peak, dampAt: at + hold, stopAt, pedalled: held }
+  }
+
+  /** Render one note on its own, for measuring rather than listening. */
+  async render(midi: number, vel: number, seconds = 1.2): Promise<Float32Array> {
+    const rate = this.ctx.sampleRate
+    const off = new OfflineAudioContext(1, Math.floor(rate * seconds), rate)
+    this.voice(off, { midi, vel, dur: 0.6, release: 0.3, pan: 0 }, 0, [off.destination])
+    return (await off.startRendering()).getChannelData(0)
   }
 
   /**
