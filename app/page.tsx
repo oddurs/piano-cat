@@ -181,7 +181,7 @@ export default function Page() {
       await piano.init((v) => { doneRef.current = v })
     }
     piano.resume()
-    exposeForProbe(piano)
+    exposeForProbe({ piano })
     if (screenRef.current !== 'menu') { setListening(false); return }
     const p = PIECES[selRef.current]
     const con = new Conductor(p, piano)
@@ -220,6 +220,7 @@ export default function Page() {
       }
     }
 
+    exposeForProbe({ cam, probe: probeRef.current })
     await cam.loadHands()
     if (cam.modelNote) warn(cam.modelNote)
     else if (screenRef.current === 'play') renRef.current?.reveal('HANDS READY - WAVE TO TAKE OVER')
@@ -240,7 +241,7 @@ export default function Page() {
     pianoRef.current = piano
     await piano.init((v) => { doneRef.current = v })
     piano.resume()
-    exposeForProbe(piano)
+    exposeForProbe({ piano })
 
     const now = performance.now() / 1000
     const con = new Conductor(p, piano)
@@ -709,10 +710,11 @@ export default function Page() {
  * a permanent handle on the audio engine is not something a page should carry
  * around, so it appears only when explicitly asked for by query string.
  */
-function exposeForProbe(piano: Piano) {
+function exposeForProbe(bits: { piano?: Piano; probe?: Probe; cam?: Camera }) {
   if (typeof window === 'undefined') return
   if (!new URLSearchParams(window.location.search).has('probe')) return
-  ;(window as unknown as { __piano?: Piano }).__piano = piano
+  const w = window as unknown as Record<string, unknown>
+  for (const [k, v] of Object.entries(bits)) if (v) w[`__${k}`] = v
 }
 
 /** what the cat sounds like playing to itself: even, unhurried, no pedal */
