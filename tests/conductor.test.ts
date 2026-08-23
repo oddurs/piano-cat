@@ -2,9 +2,9 @@ import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
 import { Conductor, type Expression } from '../lib/conductor'
 import { PIECES } from '../lib/pieces'
-import { fakePiano } from './helpers'
+import { SHORTEST, TWO_VOICE, fakePiano, piece } from './helpers'
 
-const bach = PIECES[0]
+const bach = piece('bach-prelude')
 
 const ex = (over: Partial<Expression> = {}): Expression => ({
   dyn: 0.5, wild: 0, height: 0.4, spread: 0.5, travel: 0,
@@ -104,8 +104,9 @@ test('a hand that leaves the instrument stops playing its staff', () => {
     con.strike(t, 0.7, 'R')
     for (let k = 0; k < 30; k++) { t += 1 / 60; con.update(1 / 60, t, gone) }
   }
-  // pitches this piece only ever gives to the left hand — register alone is a
-  // bad proxy, the two hands overlap in the middle of the keyboard
+  // Which hand a note belongs to comes from the edition now, so ask that
+  // rather than guessing from the register — the two hands overlap in the
+  // middle of the keyboard and in this prelude they overlap constantly.
   const right = new Set(bach.notes.filter((n) => n.h === 1).map((n) => n.p))
   const leftOnly = new Set(bach.notes.filter((n) => n.h === -1 && !right.has(n.p)).map((n) => n.p))
   const late = piano.played.slice(mark)
@@ -118,16 +119,18 @@ test('playing one-handed all along still gets you the whole piece', () => {
   // The bass staff is gated on the left hand. Somebody who only ever waves one
   // hand has not put a hand down — they have never picked one up — and taking
   // half the music away from them is a punishment for a thing they did not do.
-  const { piano, con } = rig()
+  const two = piece(TWO_VOICE)
+  const { piano, con } = rig(two)
   const oneHand = ex({ present: { L: false, R: true }, twoHanded: true })
   let t = 0
   for (let i = 0; i < 10; i++) {
     con.strike(t, 0.7, 'R')
     for (let k = 0; k < 30; k++) { t += 1 / 60; con.update(1 / 60, t, oneHand) }
   }
-  const right = new Set(bach.notes.filter((n) => n.h === 1).map((n) => n.p))
-  const leftOnly = new Set(bach.notes.filter((n) => n.h === -1 && !right.has(n.p)).map((n) => n.p))
+  const right = new Set(two.notes.filter((n) => n.h === 1).map((n) => n.p))
+  const leftOnly = new Set(two.notes.filter((n) => n.h === -1 && !right.has(n.p)).map((n) => n.p))
   assert.ok(con.engage.L > 0.9, `left staff should stay engaged, was ${con.engage.L}`)
+  assert.ok(leftOnly.size > 0, 'the piece should have some left-hand-only pitches')
   assert.ok(
     piano.played.some((p) => leftOnly.has(p.midi)),
     'the bass line should still be playing',
@@ -137,10 +140,10 @@ test('playing one-handed all along still gets you the whole piece', () => {
 test('the loop seam does not swallow the end of the take', () => {
   // idx used to reset at the wrap, so notes between the last one played and
   // the loop point were never heard — a hole at the top of every repeat.
-  const { piano, con } = rig(PIECES[3])
+  const { piano, con } = rig(piece(SHORTEST))
   con.loop = true
-  const last = Math.max(...PIECES[3].notes.map((n) => n.b))
-  const tail = PIECES[3].notes.filter((n) => n.b === last)
+  const last = Math.max(...piece(SHORTEST).notes.map((n) => n.b))
+  const tail = piece(SHORTEST).notes.filter((n) => n.b === last)
   let t = 0
   while (con.loops < 1 && t < 120) {
     con.strike(t, 0.7, 'R')
@@ -180,12 +183,15 @@ test('both staves play when there are no hands to hold back', () => {
     con.strike(t, 0.7, i % 2 ? 'L' : 'R')
     for (let k = 0; k < 30; k++) { t += 1 / 60; con.update(1 / 60, t, ex()) }
   }
-  assert.ok(piano.played.some((p) => p.midi < 60), 'keyboard play must still get a bass line')
-  assert.ok(piano.played.some((p) => p.midi >= 60), 'and a melody')
+  // again by staff rather than by register
+  const lefts = new Set(bach.notes.filter((n) => n.h === -1).map((n) => n.p))
+  const rights = new Set(bach.notes.filter((n) => n.h === 1).map((n) => n.p))
+  assert.ok(piano.played.some((p) => lefts.has(p.midi)), 'keyboard play must still get a bass line')
+  assert.ok(piano.played.some((p) => rights.has(p.midi)), 'and a melody')
 })
 
 test('the take loops without dropping notes', () => {
-  const { piano, con } = rig(PIECES[3])
+  const { piano, con } = rig(piece(SHORTEST))
   con.loop = true
   let t = 0
   while (con.loops < 2 && t < 200) {
@@ -194,7 +200,7 @@ test('the take loops without dropping notes', () => {
     for (let k = 0; k < 30; k++) { t += p / 30; con.update(p / 30, t, ex()) }
   }
   assert.equal(con.loops, 2)
-  assert.ok(piano.played.length > PIECES[3].notes.length * 1.8, 'both takes should be complete')
+  assert.ok(piano.played.length > piece(SHORTEST).notes.length * 1.8, 'both takes should be complete')
 })
 
 test('the cat winces when you land nowhere near the beat', () => {
@@ -222,7 +228,7 @@ test('both hands at once always gets a look', () => {
 })
 
 test('finishing makes it bow, and nothing takes that away', () => {
-  const { con } = rig(PIECES[3])
+  const { con } = rig(piece(SHORTEST))
   let t = 0
   while (!con.finished && t < 120) {
     con.strike(t, 0.95, 'R')                  // loud enough to startle, normally

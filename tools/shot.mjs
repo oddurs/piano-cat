@@ -177,6 +177,9 @@ sheet('faces', [
 sheet('menu', [
   screen((px) => M.drawMenu(px, { pieces: PIECES, sel: 0, t: 1.2, camWarn: null })),
   screen((px) => M.drawMenu(px, { pieces: PIECES, sel: 2, t: 3.4, camWarn: null })),
+  // scrolled to the bottom of the list, which only exists once there are more
+  // pieces than rows
+  screen((px) => M.drawMenu(px, { pieces: PIECES, sel: PIECES.length - 1, t: 4.2, camWarn: null })),
   // t chosen so the cat's eyes are open — the normal state, and the one that
   // had never once been rendered into a sheet
   screen((px) => M.drawLoading(px, { t: 2.4, status: 'warming up the piano...', done: .45 })),
