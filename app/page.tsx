@@ -7,6 +7,9 @@ import { Piano } from '@/lib/audio'
 import { Camera, GW, GH } from '@/lib/camera'
 import { Perception } from '@/lib/perception'
 import { Probe, Recorder } from '@/lib/capture'
+import {
+  TakePlayer, TakeRecorder, decodeTake, encodeTake, loadTake, saveTake, type Take,
+} from '@/lib/take'
 import { restingHand, type PlayFrame, type Side } from '@/lib/signal'
 import { Conductor, type Expression } from '@/lib/conductor'
 import { Renderer, setFont, W, H, type CatMood } from '@/lib/render'
@@ -59,6 +62,12 @@ export default function Page() {
   const keySideRef = useRef<Side>('R')
   const autoAccRef = useRef(0)
   const debugRef = useRef(false)
+  const takeRecRef = useRef<TakeRecorder>(new TakeRecorder())
+  const lastTakeRef = useRef<Take | null>(null)
+  const replayRef = useRef<TakePlayer | null>(null)
+  const sharedRef = useRef<Take | null>(null)
+  const [shared, setShared] = useState(false)
+  const [copied, setCopied] = useState(false)
   const countRef = useRef<CountIn>(null)
   const overAtRef = useRef(0)
   const clappedRef = useRef(false)
@@ -76,6 +85,25 @@ export default function Page() {
   useEffect(() => { perRef.current.sensitivity = sens }, [sens])
   useEffect(() => { conRef.current?.setStride(stride) }, [stride])
   useEffect(() => { setFont(`${pixel.style.fontFamily}, ui-monospace, monospace`) }, [])
+
+  // Somebody sent you a performance. It is a few hundred numbers in the link.
+  // Also listened for on hashchange, because pasting a link into a tab that
+  // already has the page open is a same-document navigation — nothing reloads,
+  // and without this the link would appear to do nothing at all.
+  useEffect(() => {
+    const read = () => {
+      const m = /[#&]t=([A-Za-z0-9_-]+)/.exec(window.location.hash)
+      const t = m ? decodeTake(m[1]) : null
+      if (t && PIECES.some((p) => p.id === t.piece) && screenRef.current === 'menu') {
+        sharedRef.current = t
+        setShared(true)
+      }
+    }
+    read()
+    lastTakeRef.current ??= loadTake()
+    window.addEventListener('hashchange', read)
+    return () => window.removeEventListener('hashchange', read)
+  }, [])
 
   // integer-scale the canvas so no pixel is ever a fraction
   useEffect(() => {
@@ -101,10 +129,11 @@ export default function Page() {
     // Coming in early is not a mistake, it is you taking the piece over.
     countRef.current = null
     con.strike(now, strength, side)
+    if (!replayRef.current) takeRecRef.current.stroke(now, side, strength)
     sawFirstRef.current = true
   }, [])
 
-  const begin = useCallback(async (p: Piece) => {
+  const begin = useCallback(async (p: Piece, watchThis?: Take) => {
     if (screenRef.current !== 'menu') return
     setPiece(p)
     pieceRef.current = p
@@ -167,7 +196,18 @@ export default function Page() {
     clappedRef.current = false
     overAtRef.current = 0
     countRef.current = { left: p.pulsesPerBar, at: performance.now() / 1000 + 0.7 }
+    replayRef.current = null
+    takeRecRef.current.start(p.id, performance.now() / 1000)
     probeRef.current.clear()
+
+    if (watchThis) {
+      sharedRef.current = null
+      setShared(false)
+      replayRef.current = new TakePlayer(watchThis)
+      countRef.current = null
+      setScreen('play')
+      return
+    }
 
     if (cam.stream && cam.mode === 'hands') {
       per.beginCalibration()
@@ -195,6 +235,33 @@ export default function Page() {
     countRef.current = con ? { left: con.piece.pulsesPerBar, at: performance.now() / 1000 + 0.5 } : null
     takeRef.current = 1
     setTake(1)
+  }, [])
+
+  const watch = useCallback((t: Take) => {
+    const piece = PIECES.find((x) => x.id === t.piece)
+    const piano = pianoRef.current
+    if (!piece || !piano?.ready) return
+    piano.allOff(0.2)
+    setPiece(piece)
+    pieceRef.current = piece
+    const con = new Conductor(piece, piano)
+    conRef.current = con
+    replayRef.current = new TakePlayer(t)
+    sawFirstRef.current = false
+    clappedRef.current = false
+    overAtRef.current = 0
+    countRef.current = null
+    setScreen('play')
+  }, [])
+
+  const share = useCallback(() => {
+    const t = lastTakeRef.current
+    if (!t) return
+    const url = `${window.location.origin}${window.location.pathname}#t=${encodeTake(t)}`
+    navigator.clipboard?.writeText(url).catch(() => {})
+    window.history.replaceState(null, '', `#t=${encodeTake(t)}`)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 2200)
   }, [])
 
   /** Round again, at the pace you already found. */
@@ -232,7 +299,12 @@ export default function Page() {
 
       const scr = screenRef.current
       if (scr === 'menu') {
-        drawMenu(ren.px, { pieces: PIECES, sel: selRef.current, t, camWarn: warnRef.current?.text ?? null })
+        drawMenu(ren.px, {
+          pieces: PIECES, sel: selRef.current, t,
+          camWarn: sharedRef.current
+            ? 'SOMEONE SENT YOU A TAKE - ENTER TO WATCH'
+            : warnRef.current?.text ?? null,
+        })
       } else if (scr === 'loading') {
         drawLoading(ren.px, { t, status: statusRef.current, done: doneRef.current })
       } else if (scr === 'calibrate') {
@@ -269,6 +341,19 @@ export default function Page() {
           countRef.current = null
         }
 
+        // --- a recorded performance, played back through the same follower
+        const rp = replayRef.current
+        let shape: { dyn: number; height: number; spread: number } | undefined
+        if (rp) {
+          countRef.current = null
+          const step = rp.advance(dt)
+          shape = step.shape
+          for (const st of step.strokes) {
+            con.strike(now, st.strength, st.side)
+            sawFirstRef.current = true
+          }
+        }
+
         if (autoRef.current) {
           autoAccRef.current += dt
           while (autoAccRef.current >= con.period) {
@@ -279,26 +364,34 @@ export default function Page() {
           }
         }
 
-        const tracked = f.tracked && !autoRef.current
+        const tracked = f.tracked && !autoRef.current && !rp
         const ex: Expression = {
-          dyn: autoRef.current ? 0.55 : f.dyn,
+          dyn: shape ? shape.dyn : autoRef.current ? 0.55 : f.dyn,
           wild: Math.min(1, f.wild * 0.6 + con.unsteadiness * 0.45),
           // No hands to read? The pedal follows how hard you are playing, so
           // the instrument still breathes on the keyboard-only path.
-          height: autoRef.current ? 0.5 : tracked ? f.height : 0.42 + f.dyn * 0.34,
-          spread: f.spread,
+          height: shape ? shape.height : autoRef.current ? 0.5 : tracked ? f.height : 0.42 + f.dyn * 0.34,
+          spread: shape ? shape.spread : f.spread,
           travel: autoRef.current ? 0.2 : f.travel,
           present: { L: tracked && f.hands.L.present, R: tracked && f.hands.R.present },
           x: { L: f.hands.L.x, R: f.hands.R.x },
           twoHanded: tracked,
         }
+        if (!replayRef.current) takeRecRef.current.sample(now, ex.dyn, ex.height, ex.spread)
         con.update(dt, now, ex)
         for (const n of con.drain()) ren.noteFired(n.p, n.vel, con.piece.accent, n.kind === 'ornament')
 
         // --- the ending. Let the last chord ring on its own before the room
         // does anything, then hand over to the verdict.
         if (con.finished) {
-          if (!overAtRef.current) overAtRef.current = now
+          if (!overAtRef.current) {
+            overAtRef.current = now
+            // A replay is somebody else's performance; it does not overwrite yours.
+            if (!replayRef.current) {
+              const t = takeRecRef.current.finish(now, con.report)
+              if (t) { lastTakeRef.current = t; saveTake(t) }
+            }
+          }
           const since = now - overAtRef.current
           if (since > 1.1 && !clappedRef.current) {
             clappedRef.current = true
@@ -336,7 +429,7 @@ export default function Page() {
 
         ren.draw(con, f, dt, mood, {
           auto: autoRef.current,
-          vibe,
+          vibe: rp ? 'REPLAY' : vibe,
           hint: con.finished ? '' : hint,
           countIn: countRef.current?.left ?? null,
           over: con.finished,
@@ -362,9 +455,18 @@ export default function Page() {
       if (e.repeat) return
       const k = e.key.toLowerCase()
       if (screenRef.current === 'menu') {
-        if (k === 'arrowdown' || k === 'arrowright') { e.preventDefault(); selRef.current = (selRef.current + 1) % PIECES.length }
-        else if (k === 'arrowup' || k === 'arrowleft') { e.preventDefault(); selRef.current = (selRef.current + PIECES.length - 1) % PIECES.length }
-        else if (k === 'enter' || k === ' ') { e.preventDefault(); begin(PIECES[selRef.current]) }
+        if (k === 'arrowdown' || k === 'arrowright') {
+          e.preventDefault(); sharedRef.current = null; setShared(false)
+          selRef.current = (selRef.current + 1) % PIECES.length
+        } else if (k === 'arrowup' || k === 'arrowleft') {
+          e.preventDefault(); sharedRef.current = null; setShared(false)
+          selRef.current = (selRef.current + PIECES.length - 1) % PIECES.length
+        } else if (k === 'enter' || k === ' ') {
+          e.preventDefault()
+          const t = sharedRef.current
+          // A link to a take is a link to that take, not to the menu.
+          begin(t ? PIECES.find((x) => x.id === t.piece)! : PIECES[selRef.current], t ?? undefined)
+        }
         return
       }
       if (screenRef.current === 'calibrate' && (k === 'escape' || k === 'enter' || k === ' ')) {
@@ -380,6 +482,8 @@ export default function Page() {
         // the last two minutes, and binding it here means the last twitch of
         // your performance dismisses the verdict on that performance.
         if (k === 'enter') { e.preventDefault(); encore() }
+        else if (k === 'w' && lastTakeRef.current) watch(lastTakeRef.current)
+        else if (k === 's') share()
         else if (k === 'escape') quit()
         return
       }
@@ -404,7 +508,7 @@ export default function Page() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [begin, quit, restart, encore, takeStrike])
+  }, [begin, quit, restart, encore, takeStrike, watch, share])
 
   // A backgrounded tab gets no video frames, so the follower would wake up to
   // a several-second gap and lurch. Put the instrument down instead.
@@ -475,7 +579,9 @@ export default function Page() {
             <>
               <button className="btn" onClick={quit}>&#9664; PIECES</button>
               <button className="btn on" onClick={encore}>ENCORE &#9654;</button>
-              <span className="tag">THAT WAS A WHOLE PERFORMANCE</span>
+              <button className="btn" onClick={() => lastTakeRef.current && watch(lastTakeRef.current)}>WATCH</button>
+              <button className="btn" onClick={share}>{copied ? 'LINK COPIED' : 'SHARE'}</button>
+              <span className="tag">A TAKE IS A FEW HUNDRED NUMBERS &mdash; NO VIDEO LEAVES THIS PAGE</span>
             </>
           ) : screen === 'play' ? (
             <>
@@ -512,7 +618,9 @@ export default function Page() {
       <p className="note">
         {screen === 'play' && piece
           ? `${piece.composer} — ${piece.title}. Drop a hand to play a beat — each hand plays its own staff, and both together make a chord. Rest a hand and that staff falls back; take it out of frame and it stops. Lift both hands and the dampers come off, so everything rings. Extra taps between the beats come out as ornaments: nothing you do is ever silent. It ends on its last chord — play it all the way through. SPACE / Z / X = keystroke, A = auto, R = restart, D = meters, ESC = back.`
-          : 'Your hands are the hammers and the pedal. Every stroke plays the next beat, so the music follows your pace — speed up, drag your heels, stop dead. Play a piece to its final chord and the cat will tell you what it thought.'}
+          : shared
+            ? 'Somebody sent you a performance. Press ENTER to watch it play back — a take is a few hundred numbers describing what their hands did, and nothing else.'
+            : 'Your hands are the hammers and the pedal. Every stroke plays the next beat, so the music follows your pace — speed up, drag your heels, stop dead. Play a piece to its final chord and the cat will tell you what it thought.'}
       </p>
     </main>
   )
