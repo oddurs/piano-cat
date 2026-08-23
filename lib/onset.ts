@@ -21,56 +21,106 @@ export class StrokeDetector {
   /** 0.4 (twitchy) .. 2.5 (needs a big deliberate stroke) */
   sensitivity = 1
 
-  private prevY = 0
   private prevT = 0
   private has = false
-  private vy = 0
-  private prevVy = 0
+  private prev: number[] = []
+  private vel: number[] = []
+  private prevBest = 0
   private peak = MIN_VY
+  private loud = MIN_VY * 2
+  private noise = MIN_VY * 0.35
   private armed = true
   private lastFire = -Infinity
 
   constructor(private side: Side) {}
 
-  /** Feed one video frame. Returns a stroke on the frame it begins. */
-  feed(t: number, y: number, present: boolean, capturedAt = t): Stroke | null {
-    if (!present) { this.has = false; this.vy = 0; this.armed = true; return null }
+  /**
+   * Feed one video frame: each fingertip's press, thumb first.
+   *
+   * The detector used to watch a single averaged point, which is deaf to the
+   * thing people most often do — drop one finger and leave the rest of the
+   * hand where it is. Five levers are watched separately and the fastest one
+   * decides, so a small deliberate tap reads as a stroke instead of
+   * disappearing into an average that barely moved.
+   *
+   * How many of them move together sets how hard the note is, which is what
+   * happens on a real keyboard as well.
+   */
+  feed(t: number, press: number[], present: boolean, capturedAt = t): Stroke | null {
+    if (!present || !press.length) { this.has = false; this.armed = true; this.vel = []; return null }
 
     const dt = this.has ? t - this.prevT : 0
-    if (!this.has || dt <= 0) {
-      this.has = true; this.prevY = y; this.prevT = t
+    if (!this.has || dt <= 0 || this.prev.length !== press.length) {
+      this.has = true
+      this.prev = [...press]
+      this.vel = press.map(() => 0)
+      this.prevT = t
       return null
     }
     this.prevT = t
 
-    const raw = (y - this.prevY) / dt
-    this.prevY = y
-    this.prevVy = this.vy
-    // Just enough smoothing to kill landmark jitter; one camera frame's worth.
-    this.vy += (raw - this.vy) * lerpRate(dt, 0.028)
+    const smooth = lerpRate(dt, 0.028)
+    for (let i = 0; i < press.length; i++) {
+      const raw = (press[i] - this.prev[i]) / dt
+      this.vel[i] += (raw - this.vel[i]) * smooth
+      this.prev[i] = press[i]
+    }
 
-    // Threshold rides your own recent peaks, so a small gesturer and a big
-    // gesturer both get the same instrument.
-    this.peak = Math.max(this.vy, this.peak * Math.exp(-dt / 2.4), MIN_VY)
-    const thr = Math.max(MIN_VY, this.peak * 0.42) * this.sensitivity
+    const best = Math.max(...this.vel)
+    this.peak = Math.max(best, this.peak * Math.exp(-dt / 2.4), MIN_VY)
 
-    if (!this.armed && this.vy < thr * 0.35) this.armed = true
+    // What this room and this person look like when nothing is happening.
+    // A fixed floor means somebody playing delicately is simply not heard,
+    // and the reply to not being heard is to wave harder, which is the
+    // opposite of what an instrument should teach you.
+    const quiet = Math.max(0, best)
+    this.noise += (quiet - this.noise) * lerpRate(dt, best > this.noise ? 4 : 1.5)
+    const floor = clamp(this.noise * 2.6, MIN_VY * 0.4, MIN_VY * 1.7)
+    const thr = Math.max(floor, this.peak * 0.42) * this.sensitivity
 
-    if (!this.armed || this.vy <= thr) return null
-    if (t - this.lastFire < MIN_GAP) return null
+    if (!this.armed && best < thr * 0.35) this.armed = true
+    if (!this.armed || best <= thr) { this.prevBest = best; return null }
+    if (t - this.lastFire < MIN_GAP) { this.prevBest = best; return null }
 
     this.armed = false
     this.lastFire = t
 
-    // Where this stroke is heading, ~45ms out. That is the hammer speed.
-    const accel = (this.vy - this.prevVy) / dt
-    const projected = Math.max(this.vy, this.vy + accel * 0.045)
-    const strength = clamp(Math.pow(projected / (thr * 1.9), 0.7), 0.14, 1)
+    // where between this frame and the last one it actually crossed
+    const rise = best - this.prevBest
+    const frac = rise > 1e-6 ? clamp((best - thr) / rise, 0, 1) : 0
+    const at = t - dt * frac
 
-    return { side: this.side, t, strength, x: 0, latency: Math.max(0, t - capturedAt) }
+    // How hard, measured against the hardest you have played lately rather
+    // than against the firing threshold. The threshold chases the last few
+    // seconds closely — that is what makes it fire reliably — so dividing by
+    // it meant every steady stroke came out at exactly full force and the
+    // whole dynamic range of a gesture collapsed to one value.
+    const accel = (best - this.prevBest) / dt
+    const projected = Math.max(best, best + accel * 0.045)
+    this.loud = Math.max(projected, this.loud * Math.exp(-dt / 9), MIN_VY * 1.2)
+    // and a hand landing flat is a harder note than one finger tapping
+    const moving = this.vel.filter((v) => v > thr * 0.55).length
+    const strength = clamp(
+      Math.pow(projected / this.loud, 0.75) * 0.86 * (0.72 + moving * 0.056),
+      0.12,
+      1,
+    )
+    this.prevBest = best
+
+    return { side: this.side, t: at, strength, x: 0, latency: Math.max(0, at - capturedAt) }
   }
 
-  reset() { this.has = false; this.armed = true; this.vy = 0; this.peak = MIN_VY; this.lastFire = -Infinity }
+  reset() {
+    this.has = false
+    this.armed = true
+    this.vel = []
+    this.prev = []
+    this.peak = MIN_VY
+    this.loud = MIN_VY * 2
+    this.noise = MIN_VY * 0.35
+    this.prevBest = 0
+    this.lastFire = -Infinity
+  }
 }
 
 /** frame-heights per second below which nothing counts as a deliberate stroke */
