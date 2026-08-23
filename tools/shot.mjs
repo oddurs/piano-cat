@@ -141,7 +141,7 @@ sheet('tracking', [
   // the debug meters, which are easy to let drift over the playfield
   play(2, 6.4, {
     dyn: .6, mood: 'happy', vibe: 'MAESTRO', tracked: true, height: .6,
-    debug: { fps: 58, p50: 21, p95: 34, mode: 'HANDS' },
+    debug: { fps: 58, p50: 21, p95: 34, mode: 'HANDS', out: 12 },
   }),
   // no hands seen at all: the fallback look, with the prompt showing
   play(1, 4.0, { dyn: .35, mood: 'calm', vibe: 'SPIRITED', hint: 'SHOW ME YOUR HANDS' }),
