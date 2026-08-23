@@ -21,7 +21,7 @@ type Screen = 'menu' | 'loading' | 'play' | 'verdict'
 /** the piece is yours after this many counted beats, or on your first stroke */
 type CountIn = { left: number; at: number } | null
 /** let the last chord ring before anyone claps over it */
-const RING_OUT = 2.8
+const RING_OUT = 4
 /** long enough that a trailing stroke cannot skip your own verdict */
 const VERDICT_GRACE = 2
 
@@ -246,7 +246,8 @@ export default function Page() {
     const now = performance.now() / 1000
     const con = new Conductor(p, piano)
     conRef.current = con
-    setStride(con.stride)
+    exposeForProbe({ con })
+    setStride(con.wave)      // gestures per wave, not the span of one
     takeRef.current = 1; setTake(1)
     sawFirstRef.current = false
     autoAccRef.current = 0
@@ -465,9 +466,9 @@ export default function Page() {
             }
           }
           const since = now - overAtRef.current
-          if (since > 1.1 && !clappedRef.current) {
+          if (since > 0.35 && !clappedRef.current) {
             clappedRef.current = true
-            pianoRef.current?.applaud()
+            pianoRef.current?.finale(con.piece.resonance)
           }
           if (since > RING_OUT && screenRef.current !== 'verdict') {
             verdictAtRef.current = now
@@ -710,7 +711,7 @@ export default function Page() {
  * a permanent handle on the audio engine is not something a page should carry
  * around, so it appears only when explicitly asked for by query string.
  */
-function exposeForProbe(bits: { piano?: Piano; probe?: Probe; cam?: Camera }) {
+function exposeForProbe(bits: { piano?: Piano; probe?: Probe; cam?: Camera; con?: Conductor }) {
   if (typeof window === 'undefined') return
   if (!new URLSearchParams(window.location.search).has('probe')) return
   const w = window as unknown as Record<string, unknown>

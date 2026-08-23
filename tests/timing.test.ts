@@ -46,7 +46,12 @@ function run(piece: Piece, strikes: Hit[], opts: { strideAt?: [number, number][]
   while (T < end) {
     let struck = false
     while (si < strikes.length && strikes[si].t <= T) {
-      con.strike(T, 0.6, strikes[si].side)
+      // at the stroke's own moment, not the frame's. A stroke arrives from
+      // the camera with its own timestamp and is handled there and then;
+      // rounding it to the next frame is up to a frame of error injected
+      // into the tempo estimate by the test rather than by the code.
+      piano.clock.now = strikes[si].t
+      con.strike(strikes[si].t, 0.6, strikes[si].side)
       si++
       struck = true
     }
@@ -132,7 +137,9 @@ for (const piece of PIECES) {
 // ------------------------------------------------------------------- bach
 
 const bach = piece('bach-prelude')
-const p0 = 60 / bach.pulseBpm
+/** seconds between strokes when playing this piece at the tempo it asks for.
+ *  Not 60/pulseBpm: a stroke is a gesture, and a gesture is not a pulse. */
+const p0 = strokePeriod(bach)
 
 test('a camera double-triggering the same hand does not run the tempo away', () => {
   const doubled: Hit[] = []

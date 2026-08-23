@@ -52,9 +52,16 @@ test('the beat lands on the gesture, not after the follower catches up', () => {
   const period = con.period
 
   const before = piano.played.length
+  const wasAt = con.pos
   con.strike(period, 0.7, 'L')
-  // the playhead has already moved, before any update() has run
-  assert.ok(con.pos >= 1, `playhead should be on beat 1 immediately, was ${con.pos}`)
+  // the playhead has already moved, before any update() has run. How far is
+  // the gesture's business — what matters here is that it moved at all, and
+  // that it landed exactly on the next gesture rather than somewhere near it.
+  assert.ok(con.pos > wasAt, `playhead did not move, still ${con.pos}`)
+  assert.ok(
+    bach.gestures.some((g) => Math.abs(g - con.pos) < 1e-6),
+    `playhead landed at ${con.pos}, which is not a gesture`,
+  )
   con.update(1 / 60, period, ex())
   assert.ok(piano.played.length > before, 'beat 1 should sound in the same frame')
 })
@@ -329,4 +336,41 @@ test('a performance comes out with a real spread of weight', () => {
     const hi = Math.max(...vels)
     assert.ok(hi / lo > 1.5, `${id}: loudest note is only ${(hi / lo).toFixed(2)}x the quietest`)
   }
+})
+
+test('the instrument is never handed a value that is not a number', () => {
+  // A NaN travels a long way before anything complains about it. This one
+  // came from the wave control being seeded with the span of a gesture
+  // instead of a count of them, which made the wave half a gesture wide and
+  // read past the end of the plan; what surfaced, several layers later, was
+  // the Web Audio API refusing a non-finite duration.
+  for (const id of ['bach-prelude', 'entertainer', 'moonlight', 'chopsticks']) {
+    const { piano, con } = rig(piece(id))
+    let t = 0
+    for (let i = 0; i < 30; i++) {
+      if (i === 10) con.setStride(2)
+      if (i === 20) con.setStride(4)
+      piano.clock.now = t
+      con.strike(t, 0.4 + (i % 5) * 0.15, i % 2 ? 'L' : 'R')
+      // and a stroke landing on top of the last one, which is the path that
+      // reaches the ornament and the chord
+      if (i % 4 === 0) con.strike(t + 0.02, 0.9, i % 2 ? 'R' : 'L')
+      const p = con.period
+      for (let k = 0; k < 12; k++) { t += p / 12; piano.clock.now = t; con.update(p / 12, t, ex()) }
+    }
+    assert.ok(piano.played.length > 20, `${id}: only ${piano.played.length} notes`)
+    for (const n of piano.played) {
+      for (const [k, v] of Object.entries(n)) {
+        assert.ok(Number.isFinite(v), `${id}: ${k} came out as ${v}`)
+      }
+    }
+  }
+})
+
+test('the wave control only ever takes whole gestures', () => {
+  const { con } = rig()
+  con.setStride(2.5)
+  assert.equal(con.wave, 3)
+  con.setStride(0)
+  assert.equal(con.wave, 1)
 })

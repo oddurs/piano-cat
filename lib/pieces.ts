@@ -109,13 +109,18 @@ function chopsticks(): NoteEv[] {
 }
 
 /**
- * A piece, with its gestures planned. How long a gesture should last is the
- * one editorial decision here: about four fifths of a second is a comfortable
- * rate to wave at, and the planner pulls the cuts from there onto whatever the
- * music is doing nearby.
+ * A piece, with its gestures planned.
+ *
+ * How long a gesture lasts is the one editorial decision here, and it is the
+ * difference between conducting and playing. At about a second each, one
+ * movement of your hand released a whole bar of music: the piece lurched
+ * forward and your hands were plainly not the thing making the notes. At
+ * about half a second you are moving roughly twice a second — once per hand
+ * if you alternate them — and what comes out is a note or a few, which is the
+ * rate a cat's paws move in the video everybody has seen.
  */
 function scored(p: Omit<Piece, 'gestures'> & { gestureSeconds?: number }): Piece {
-  const span = spanFor(p.pulseBpm, p.gestureSeconds ?? 0.9)
+  const span = spanFor(p.pulseBpm, p.gestureSeconds ?? 0.5)
   return { ...p, gestures: planGestures(p.notes, p.loopAt, p.pulsesPerBar, span).at }
 }
 
