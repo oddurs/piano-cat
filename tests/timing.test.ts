@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { Conductor, type Expression } from '../lib/conductor'
 import { PIECES, type Piece } from '../lib/pieces'
 import type { Side } from '../lib/signal'
-import { SHORTEST, fakePiano, piece } from './helpers'
+import { SHORTEST, fakePiano, piece, strokesToFinish } from './helpers'
 
 // Ported from tools/sim.mjs. Same synthetic strike patterns, same properties,
 // re-expressed for a follower that now moves the playhead on the gesture
@@ -73,7 +73,8 @@ function run(piece: Piece, strikes: Hit[], opts: { strideAt?: [number, number][]
 
 /** Seconds per stroke of a hand — not per pulse. The two are the same only
  *  when a piece advances one beat per wave, which is no longer all of them. */
-const strokePeriod = (piece: Piece) => (60 / piece.pulseBpm) * piece.stride
+const strokePeriod = (piece: Piece) =>
+  (60 / piece.pulseBpm) * (piece.loopAt / piece.gestures.length) * piece.stride
 
 const steady = (n: number, p: number, t0 = 0): Hit[] =>
   Array.from({ length: n }, (_, i) => ({ t: t0 + i * p, side: (i % 2 ? 'R' : 'L') as Side }))
@@ -225,7 +226,7 @@ test('a big early strike is a flourish at any beats-per-wave, never a clump', ()
 
 test('a performance ends at the last bar instead of wrapping', () => {
   for (const piece of PIECES) {
-    const strokes = Math.ceil(piece.loopAt / piece.stride) + 4
+    const strokes = strokesToFinish(piece)
     const r = run(piece, steady(strokes, strokePeriod(piece)), { loop: false })
     assert.ok(r.con.finished, `${piece.id} never finished`)
     assert.ok(
@@ -238,7 +239,7 @@ test('a performance ends at the last bar instead of wrapping', () => {
 
 test('the piece plays its final chord before it stops', () => {
   for (const piece of PIECES) {
-    const strokes = Math.ceil(piece.loopAt / piece.stride) + 4
+    const strokes = strokesToFinish(piece)
     const r = run(piece, steady(strokes, strokePeriod(piece)), { loop: false })
     const last = Math.max(...piece.notes.map((n) => n.b))
     for (const n of piece.notes.filter((n) => n.b === last)) {
@@ -251,7 +252,7 @@ test('the piece plays its final chord before it stops', () => {
 })
 
 test('once it is over, waving does nothing', () => {
-  const r = run(bach, steady(bach.loopAt + 4, p0), { loop: false })
+  const r = run(bach, steady(strokesToFinish(bach), p0), { loop: false })
   const before = r.piano.played.length
   assert.equal(r.con.strike(999, 0.8, 'R'), 'over')
   r.con.update(DT, 999, EX)
@@ -259,7 +260,7 @@ test('once it is over, waving does nothing', () => {
 })
 
 test('an encore starts over but keeps the tempo you found', () => {
-  const r = run(bach, steady(bach.loopAt + 4, p0 * 0.75), { loop: false })
+  const r = run(bach, steady(strokesToFinish(bach), p0 * 0.75), { loop: false })
   const tempo = r.con.bpm
   assert.ok(r.con.finished)
   r.con.encore()
@@ -269,7 +270,7 @@ test('an encore starts over but keeps the tempo you found', () => {
 })
 
 test('the verdict reflects how it was actually played', () => {
-  const steadyRun = run(bach, steady(bach.loopAt + 4, p0), { loop: false })
+  const steadyRun = run(bach, steady(strokesToFinish(bach), p0), { loop: false })
   let t = 0
   const sloppy: Hit[] = [{ t, side: 'L' }]
   for (let i = 0; i < bach.loopAt + 4; i++) {
@@ -296,7 +297,7 @@ function atFrameRate(piece: Piece, fps: number) {
   const con = new Conductor(piece, piano as unknown as never)
   const dt = 1 / fps
   const per = strokePeriod(piece)
-  const hits = steady(Math.ceil(piece.loopAt / piece.stride) + 2, per)
+  const hits = steady(strokesToFinish(piece), per)
   let t = 0
   let i = 0
   while (!con.finished && t < hits[hits.length - 1].t + 4) {
@@ -340,7 +341,7 @@ function onsets(piece: Piece, fps: number) {
   const con = new Conductor(piece, piano as unknown as never)
   const dt = 1 / fps
   const per = strokePeriod(piece)
-  const hits = steady(Math.ceil(piece.loopAt / piece.stride) + 2, per)
+  const hits = steady(strokesToFinish(piece), per)
   let t = 0
   let i = 0
   while (!con.finished && t < hits[hits.length - 1].t + 4) {
@@ -364,7 +365,7 @@ test('a written run comes out evenly, whatever the frame rate', () => {
   // that has to be true of a machine dropping to twenty frames a second too,
   // because the alternative is an instrument that stutters when something
   // else on the laptop gets busy.
-  const expected = (60 / bach.pulseBpm) * 0.25
+  const nominal = (60 / bach.pulseBpm) * 0.25
   for (const fps of [20, 30, 60, 144]) {
     const xs = onsets(bach, fps)
     const gaps: number[] = []
@@ -372,13 +373,18 @@ test('a written run comes out evenly, whatever the frame rate', () => {
     // because the grid is what the strokes are for
     for (let i = 5; i < xs.length; i++) {
       const g = xs[i] - xs[i - 1]
-      if (g > expected * 0.4 && g < expected * 1.6) gaps.push(g)
+      if (g > nominal * 0.4 && g < nominal * 1.6) gaps.push(g)
     }
     assert.ok(gaps.length > 60, `${fps}fps: only ${gaps.length} usable gaps`)
-    const worst = Math.max(...gaps.map((g) => Math.abs(g - expected)))
+    // Even means even with each other. The absolute rate is set by how fast
+    // the player is waving and by how much music a gesture covers, and this
+    // test is not about either of those — it is about whether a written run
+    // comes out level or lumpy.
+    const median = [...gaps].sort((a, b) => a - b)[gaps.length >> 1]
+    const worst = Math.max(...gaps.map((g) => Math.abs(g - median)))
     assert.ok(
       worst < 0.004,
-      `${fps}fps: a sixteenth landed ${(worst * 1000).toFixed(1)}ms off an even grid`,
+      `${fps}fps: a sixteenth landed ${(worst * 1000).toFixed(1)}ms off its neighbours`,
     )
   }
 })

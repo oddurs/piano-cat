@@ -15,6 +15,7 @@
 // Chopsticks is the exception and says so: it is an oral tradition with no
 // urtext to import, and its notes are written out below as an arrangement.
 
+import { planGestures, spanFor } from './gesture'
 import * as allaTurca from './scores/alla-turca'
 import * as bachPrelude from './scores/bach-prelude'
 import * as entertainer from './scores/entertainer'
@@ -42,7 +43,9 @@ export type Piece = {
   blurb: string
   pulseBpm: number      // suggested pulses (beats) per minute
   pulsesPerBar: number
-  stride: number        // beats advanced by one stroke of your hand
+  stride: number        // gestures advanced by one stroke of your hand
+  /** where a stroke of your hand belongs, worked out from the score itself */
+  gestures: number[]
   loopAt: number        // pulse count at which the take starts over
   release: number       // seconds of release ramp (pedal-ish feel)
   accent: string        // hex, drives the palette
@@ -105,8 +108,19 @@ function chopsticks(): NoteEv[] {
   return o
 }
 
+/**
+ * A piece, with its gestures planned. How long a gesture should last is the
+ * one editorial decision here: about four fifths of a second is a comfortable
+ * rate to wave at, and the planner pulls the cuts from there onto whatever the
+ * music is doing nearby.
+ */
+function scored(p: Omit<Piece, 'gestures'> & { gestureSeconds?: number }): Piece {
+  const span = spanFor(p.pulseBpm, p.gestureSeconds ?? 0.9)
+  return { ...p, gestures: planGestures(p.notes, p.loopAt, p.pulsesPerBar, span).at }
+}
+
 export const PIECES: Piece[] = [
-  {
+  scored({
     id: 'bach-prelude',
     title: 'Prelude in C',
     composer: 'J.S. Bach',
@@ -117,8 +131,8 @@ export const PIECES: Piece[] = [
     accent: '#5ff2d6', accent2: '#1b6b7a',
     resonance: [48, 55, 60, 64, 67, 72, 79],
     notes: bachPrelude.notes,
-  },
-  {
+  }),
+  scored({
     id: 'minuet-g',
     title: 'Minuet in G',
     composer: 'C. Petzold',
@@ -129,8 +143,8 @@ export const PIECES: Piece[] = [
     accent: '#ffe27a', accent2: '#7a5a12',
     resonance: [43, 50, 55, 59, 62, 67, 74],
     notes: minuetG.notes,
-  },
-  {
+  }),
+  scored({
     id: 'fur-elise',
     title: 'Für Elise',
     composer: 'L. van Beethoven',
@@ -141,8 +155,8 @@ export const PIECES: Piece[] = [
     accent: '#ffb3d1', accent2: '#8a3a6b',
     resonance: [45, 52, 57, 60, 64, 69, 76],
     notes: furElise.notes,
-  },
-  {
+  }),
+  scored({
     id: 'moonlight',
     title: 'Moonlight Sonata',
     composer: 'L. van Beethoven',
@@ -153,8 +167,8 @@ export const PIECES: Piece[] = [
     accent: '#9fb8ff', accent2: '#26356e',
     resonance: [37, 49, 56, 61, 64, 68, 73],
     notes: moonlight.notes,
-  },
-  {
+  }),
+  scored({
     id: 'pathetique',
     title: 'Pathétique II',
     composer: 'L. van Beethoven',
@@ -165,76 +179,76 @@ export const PIECES: Piece[] = [
     accent: '#d9a8ff', accent2: '#4b2a6b',
     resonance: [44, 51, 56, 60, 63, 68, 75],
     notes: pathetique.notes,
-  },
-  {
+  }),
+  scored({
     id: 'sonata-facile',
     title: 'Sonata Facile',
     composer: 'W.A. Mozart',
     short: 'Mozart',
     blurb: 'K.545. Mozart called it for beginners. Mozart was being unkind.',
-    pulseBpm: 116, pulsesPerBar: sonataFacile.pulsesPerBar, stride: 2,
+    pulseBpm: 116, pulsesPerBar: sonataFacile.pulsesPerBar, stride: 1,
     loopAt: sonataFacile.loopAt, release: 0.24,
     accent: '#8ee6ff', accent2: '#14566b',
     resonance: [48, 55, 60, 64, 67, 72, 79],
     notes: sonataFacile.notes,
-  },
-  {
+  }),
+  scored({
     id: 'alla-turca',
     title: 'Rondo alla Turca',
     composer: 'W.A. Mozart',
     short: 'Mozart',
     blurb: 'A janissary band, arriving. One hundred and twenty-eight bars of it.',
-    pulseBpm: 120, pulsesPerBar: allaTurca.pulsesPerBar, stride: 2,
+    pulseBpm: 120, pulsesPerBar: allaTurca.pulsesPerBar, stride: 1,
     loopAt: allaTurca.loopAt, release: 0.2,
     accent: '#ff9d5c', accent2: '#7a3a12',
     resonance: [45, 52, 57, 61, 64, 69, 76],
     notes: allaTurca.notes,
-  },
-  {
+  }),
+  scored({
     id: 'entertainer',
     title: 'The Entertainer',
     composer: 'S. Joplin',
     short: 'Joplin',
     blurb: 'Ragtime. The tune lands between the beats; the bass never does.',
-    pulseBpm: 100, pulsesPerBar: entertainer.pulsesPerBar, stride: 2,
+    pulseBpm: 100, pulsesPerBar: entertainer.pulsesPerBar, stride: 1,
     loopAt: entertainer.loopAt, release: 0.2,
     accent: '#ffa64d', accent2: '#8a4a12',
     resonance: [48, 55, 60, 64, 67, 72, 79],
     notes: entertainer.notes,
-  },
-  {
+  }),
+  scored({
     id: 'mapleleaf',
     title: 'Maple Leaf Rag',
     composer: 'S. Joplin',
     short: 'Joplin',
     blurb: 'The one that sold half a million copies. Tempo di marcia.',
-    pulseBpm: 100, pulsesPerBar: mapleLeaf.pulsesPerBar, stride: 2,
+    pulseBpm: 100, pulsesPerBar: mapleLeaf.pulsesPerBar, stride: 1,
     loopAt: mapleLeaf.loopAt, release: 0.18,
     accent: '#b5e853', accent2: '#3e6b12',
     resonance: [44, 51, 56, 60, 63, 68, 75],
     notes: mapleLeaf.notes,
-  },
-  {
+  }),
+  scored({
     id: 'mountain-king',
     title: 'Mountain King',
     composer: 'E. Grieg',
     short: 'Grieg',
     blurb: 'Start it as slowly and quietly as you dare. Do not stay there.',
-    pulseBpm: 132, pulsesPerBar: mountainKing.pulsesPerBar, stride: 2,
+    pulseBpm: 132, pulsesPerBar: mountainKing.pulsesPerBar, stride: 1,
     loopAt: mountainKing.loopAt, release: 0.22,
     accent: '#c69bff', accent2: '#4a2a80',
     resonance: [35, 47, 54, 59, 62, 66, 71],
     notes: mountainKing.notes,
-  },
-  {
+  }),
+  scored({
     id: 'chopsticks',
     title: 'Chopsticks',
     composer: 'trad.',
     short: 'trad.',
     blurb: 'A waltz for the sides of both hands. Deeply silly. Weirdly hard.',
-    pulseBpm: 150, pulsesPerBar: 3, stride: 3, loopAt: 27, release: 0.18,
+    pulseBpm: 150, pulsesPerBar: 3, stride: 1, loopAt: 27, release: 0.18,
     accent: '#8ef07a', accent2: '#2c6b24',
     resonance: [48, 55, 60, 64, 67, 72, 76],
     notes: chopsticks(),
-  },
+  }),
 ]

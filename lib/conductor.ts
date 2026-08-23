@@ -105,10 +105,34 @@ export class Conductor {
   private notes: NoteEv[]
   private idx = 0
 
-  /** pulses per stroke of your hand. 1 = you wave every beat. */
-  stride: number
+  /** gestures advanced by one stroke of your hand */
+  wave: number
+  private gestures: number[]
+  private gi = 0
   pos = 0                  // absolute pulses, monotonic
   private beatOrigin = 0   // pos of the most recent stroke
+
+  /**
+   * How much music this stroke of your hand covers. Not a constant any more:
+   * the score was cut into gestures at the places it is actually articulated,
+   * so the span varies a little from one wave to the next and the notes it
+   * releases are the ones that belong together.
+   */
+  get stride() {
+    return Math.max(0.05, this.gestureAt(this.gi + this.wave) - this.gestureAt(this.gi))
+  }
+
+  /** the same position, in whichever repeat of the piece we are on */
+  private gestureAt(i: number) {
+    const G = this.gestures.length
+    const cycle = Math.floor(i / G)
+    return this.gestures[((i % G) + G) % G] + cycle * this.piece.loopAt
+  }
+
+  /** pulses in an average gesture — the steady number, for reporting tempo */
+  private get avgSpan() {
+    return this.piece.loopAt / this.gestures.length
+  }
   period: number           // seconds per stroke
   started = false
   loops = 0
@@ -161,14 +185,16 @@ export class Conductor {
     this.piece = piece
     this.piano = piano
     this.notes = piece.notes
-    this.stride = piece.stride
-    this.period = (60 / piece.pulseBpm) * piece.stride
+    this.gestures = piece.gestures.length ? piece.gestures : [0]
+    this.wave = piece.stride
+    this.period = (60 / piece.pulseBpm) * this.avgSpan * this.wave
     piano.setResonance(piece.resonance)
   }
 
   get playhead() { return this.pos % this.piece.loopAt }
-  /** musical beats per minute, not strokes per minute */
-  get bpm() { return (60 / this.period) * this.stride }
+  /** pulses per minute — averaged over the gestures, so it does not jitter
+   *  as the spans vary from one wave to the next */
+  get bpm() { return (60 / this.period) * this.avgSpan * this.wave }
   get beatInBar() { return Math.floor(this.playhead) % this.piece.pulsesPerBar }
   get progress() { return this.playhead / this.piece.loopAt }
   get idleFor() { return this.lastStrikeAt < 0 ? 0 : performance.now() / 1000 - this.lastStrikeAt }
@@ -190,10 +216,10 @@ export class Conductor {
     return Math.min(1, sd / mean / 0.45)
   }
 
-  setStride(s: number) {
-    this.period = (this.period / this.stride) * s
-    this.stride = s
-    this.beatOrigin = this.pos
+  setStride(w: number) {
+    this.period = (this.period / this.wave) * w
+    this.wave = w
+    this.beatOrigin = this.gestureAt(this.gi)
   }
 
   // ----------------------------------------------------------------- strikes
@@ -215,6 +241,7 @@ export class Conductor {
       this.started = true
       this.lastStrikeAt = now
       this.lastSide = side
+      this.gi = 0
       this.beatOrigin = 0
       this.strikeCount = 1
       this.strikeFlash = 1
@@ -270,7 +297,8 @@ export class Conductor {
       if (this.intervals.length > 16) this.intervals.shift()
     }
     this.lastStrikeAt = now
-    this.beatOrigin += this.stride
+    this.gi += this.wave
+    this.beatOrigin = this.gestureAt(this.gi)
     this.strikeCount += 1
 
     // The beat moves now, and so does the sound. Waiting for the next frame
@@ -588,13 +616,14 @@ export class Conductor {
   reset() {
     this.idx = 0
     this.pos = 0
+    this.gi = 0
     this.beatOrigin = 0
     this.lastStrikeAt = -1
     this.strikeCount = 0
     this.started = false
     this.loops = 0
     this.intervals = []
-    this.period = (60 / this.piece.pulseBpm) * this.stride
+    this.period = (60 / this.piece.pulseBpm) * this.avgSpan * this.wave
     this.engage = { L: 1, R: 1 }
     this.held = { L: [], R: [] }
     this.lastOf = {}
