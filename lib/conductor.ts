@@ -140,7 +140,12 @@ export class Conductor {
   }
 
   /** the same position, in whichever repeat of the piece we are on */
-  private gestureAt(i: number) {
+  private gestureAt(index: number) {
+    // Floored, because an index between two gestures is not a position in the
+    // music — it is a mistake upstream, and silently reading past the end of
+    // the array turns it into a NaN that travels a long way before anything
+    // complains.
+    const i = Math.floor(index)
     const G = this.gestures.length
     const cycle = Math.floor(i / G)
     return this.gestures[((i % G) + G) % G] + cycle * this.piece.loopAt
@@ -234,6 +239,7 @@ export class Conductor {
   }
 
   setStride(w: number) {
+    w = Math.max(1, Math.round(w))
     this.period = (this.period / this.wave) * w
     this.wave = w
     this.beatOrigin = this.gestureAt(this.gi)
@@ -309,7 +315,12 @@ export class Conductor {
       const confidence = Math.exp(-(off * off) / (2 * TEMPO_SIGMA * TEMPO_SIGMA))
       const trust = (this.strikeCount < 5 ? 0.45 : 0.26) * confidence
       if (confidence < STUMBLE_BELOW) this.react('stumble')
-      this.period = clamp(this.period * (1 - trust) + gap * trust, 0.28, 2.6)
+      // The floor is a backstop against a runaway estimate, not a speed
+      // limit on the player. It was set when one stroke covered a whole beat;
+      // a gesture is half that now, so a stroke every fifth of a second is an
+      // ordinary brisk tempo rather than something impossible, and clamping
+      // there was quietly refusing to follow an accelerando.
+      this.period = clamp(this.period * (1 - trust) + gap * trust, 0.16, 2.6)
       this.intervals.push(gap)
       if (this.intervals.length > 16) this.intervals.shift()
     }
@@ -422,8 +433,13 @@ export class Conductor {
    * four times the work for the same result.
    */
   update(dt: number, now: number, ex: Expression) {
-    this.pedal = ex.height
-    this.piano.setPedal(ex.height)
+    // Once it is over the pedal is not yours any more. Dropping your hands
+    // after the final chord used to damp the whole ending flat, which is a
+    // strange way to be thanked for finishing something.
+    if (!this.finished) {
+      this.pedal = ex.height
+      this.piano.setPedal(ex.height)
+    }
     const meanX = ex.present.L && ex.present.R
       ? (ex.x.L + ex.x.R) / 2
       : ex.present.L ? ex.x.L : ex.present.R ? ex.x.R : 0.5
