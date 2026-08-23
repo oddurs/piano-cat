@@ -6,11 +6,21 @@ import { drawCatBody, drawCandelabra, type CatState } from './cat'
 export const MW = 320
 export const MH = 180
 
-// Laid out for the length of the list, not for a number that was true once:
-// seven rows and a blurb have to fit above the keys.
+// The list scrolls. Laying the menu out for however many pieces there happen
+// to be works right up until there are more of them than fit, and then it
+// silently draws the last few over the instructions — which is what happened
+// at seven. A window that follows the selection does not care how long the
+// list gets.
 const ROW_TOP = 38
 const ROW_H = 14
+const VISIBLE = 7
 const KEYS_TOP = 164
+
+/** first row on screen, given where the selection is and how many there are */
+export function windowTop(sel: number, count: number) {
+  if (count <= VISIBLE) return 0
+  return Math.max(0, Math.min(count - VISIBLE, sel - (VISIBLE >> 1)))
+}
 
 /** greedy word wrap to a pixel width — the pixel font has no ellipsis and
  *  nothing here is short enough to trust */
@@ -26,9 +36,9 @@ function wrap(px: Px, text: string, width: number): string[] {
 }
 
 /** which piece row is under a canvas-space point, or -1 */
-export function menuRowAt(x: number, y: number, count: number) {
+export function menuRowAt(x: number, y: number, count: number, sel = 0) {
   if (x < 16 || x > MW - 16) return -1
-  const i = Math.floor((y - ROW_TOP) / ROW_H)
+  const i = Math.floor((y - ROW_TOP) / ROW_H) + windowTop(sel, count)
   return i >= 0 && i < count ? i : -1
 }
 
@@ -65,6 +75,20 @@ function drawIcon(px: Px, id: string, x: number, y: number, c: string, t: number
   } else if (id === 'moonlight') {
     px.blob(x + 2, y + 1, 9, 10, c, 3); px.blob(x + 5, y, 8, 10, '#0b0910', 3)
     px.r(x + 1, y + 2, 1, 1, '#fff'); px.r(x + 3, y + 9, 1, 1, '#fff')
+  } else if (id === 'pathetique') {
+    px.blob(x + 1, y + 3, 10, 7, c, 3)             // a sighing slur
+    px.r(x + 2, y + 8, 2, 2, '#f8e6c4'); px.r(x + 8, y + 8, 2, 2, '#f8e6c4')
+  } else if (id === 'sonata-facile') {
+    px.r(x + 1, y + 9, 10, 2, c)                   // a neat little staircase
+    px.r(x + 3, y + 6, 8, 2, c); px.r(x + 5, y + 3, 6, 2, c); px.r(x + 7, y + 1, 4, 2, c)
+  } else if (id === 'alla-turca') {
+    px.r(x + 1, y + 4, 10, 5, c)                   // a drum
+    px.r(x + 1, y + 3, 10, 1, '#f8e6c4'); px.r(x + 1, y + 9, 10, 1, '#f8e6c4')
+    px.r(x + 5, y + 1, 2, 2, c)
+  } else if (id === 'mapleleaf') {
+    px.tri(x + 6, y + 2, 9, 7, c)                  // a leaf
+    px.tri(x + 6, y + 5, 11, 5, c)
+    px.r(x + 5, y + 9, 2, 3, '#8a6a22')
   } else if (id === 'chopsticks') {
     const b = Math.sin(t * 9) > 0 ? 0 : 1          // two hands chopping
     px.r(x + 1, y + 2 + b, 4, 7, c); px.r(x + 7, y + 4 - b, 4, 7, c)
@@ -98,8 +122,10 @@ export function drawMenu(px: Px, o: {
   px.reset
 
   // --- piece rows
-  o.pieces.forEach((piece, i) => {
-    const y = ROW_TOP + i * ROW_H
+  const top = windowTop(o.sel, o.pieces.length)
+  o.pieces.slice(top, top + VISIBLE).forEach((piece, row) => {
+    const i = top + row
+    const y = ROW_TOP + row * ROW_H
     const on = i === o.sel
     if (on) {
       px.panel(16, y, MW - 32, ROW_H - 2, '#1d1636', px.mix(piece.accent2, '#ffffff', .35), '#0d0a18')
@@ -112,6 +138,15 @@ export function drawMenu(px: Px, o: {
     px.text(piece.title.toUpperCase(), 40, y + 3, on ? '#ffffff' : '#8a83aa')
     px.textR(piece.short.toUpperCase(), MW - 22, y + 3, on ? piece.accent : '#4c4763')
   })
+
+  // there is more list above and below; say so rather than just cutting it
+  // off. Down the right-hand edge, where nothing else lives — under the list
+  // is where the blurb goes, and a marker there is a marker nobody can see.
+  const last = top + VISIBLE
+  px.a(0.8)
+  if (top > 0) px.text('\u25b2', MW - 12, ROW_TOP + 2, '#6d6890')
+  if (last < o.pieces.length) px.text('\u25bc', MW - 12, ROW_TOP + (VISIBLE - 1) * ROW_H + 3, '#6d6890')
+  px.reset
 
   // --- blurb for the highlighted piece
   const lines = wrap(px, p.blurb, MW - 40)

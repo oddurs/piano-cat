@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { Conductor, type Expression } from '../lib/conductor'
 import { PIECES, type Piece } from '../lib/pieces'
 import type { Side } from '../lib/signal'
-import { fakePiano } from './helpers'
+import { SHORTEST, fakePiano, piece } from './helpers'
 
 // Ported from tools/sim.mjs. Same synthetic strike patterns, same properties,
 // re-expressed for a follower that now moves the playhead on the gesture
@@ -130,7 +130,7 @@ for (const piece of PIECES) {
 
 // ------------------------------------------------------------------- bach
 
-const bach = PIECES[0]
+const bach = piece('bach-prelude')
 const p0 = 60 / bach.pulseBpm
 
 test('a camera double-triggering the same hand does not run the tempo away', () => {
@@ -386,8 +386,8 @@ test('a written run comes out evenly, whatever the frame rate', () => {
 test('onset timing does not depend on when a frame happened to run', () => {
   // The same music, sampled by two very different displays. If scheduling
   // still leaned on frame boundaries these would drift apart.
-  const a = onsets(PIECES[6], 30)
-  const b = onsets(PIECES[6], 144)
+  const a = onsets(piece('entertainer'), 30)
+  const b = onsets(piece('entertainer'), 144)
   const n = Math.min(a.length, b.length)
   assert.ok(n > 40, `only ${n} onsets to compare`)
   for (let i = 5; i < n; i++) {

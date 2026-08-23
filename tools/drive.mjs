@@ -10,7 +10,7 @@
 
 const APP = process.env.APP ?? 'http://localhost:9393/'
 const PORT = process.env.CDP_PORT ?? 9222
-const PIECE = Number(process.env.PIECE ?? 3)          // default: the shortest
+const PIECE = Number(process.env.PIECE ?? 10)         // default: Chopsticks, the shortest
 
 const up = await fetch(APP, { method: 'GET' }).then((r) => r.ok, () => false)
 if (!up) {

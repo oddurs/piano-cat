@@ -607,13 +607,13 @@ export default function Page() {
   const onMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (screenRef.current !== 'menu') return
     const { x, y } = canvasPoint(e)
-    const i = menuRowAt(x, y, PIECES.length)
+    const i = menuRowAt(x, y, PIECES.length, selRef.current)
     if (i >= 0 && i !== selRef.current) { selRef.current = i; stopPreview() }
   }
   const onClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (screenRef.current === 'menu') {
       const { x, y } = canvasPoint(e)
-      const i = menuRowAt(x, y, PIECES.length)
+      const i = menuRowAt(x, y, PIECES.length, selRef.current)
       stopPreview()
       begin(PIECES[i >= 0 ? i : selRef.current])
     } else if (screenRef.current === 'verdict') {
@@ -697,7 +697,7 @@ export default function Page() {
           ? `${piece.composer} — ${piece.title}. Drop a hand to play a beat — each hand plays its own staff, and both together make a chord. Rest a hand and that staff falls back; take it out of frame and it stops. Lift both hands and the dampers come off, so everything rings. Extra taps between the beats come out as ornaments: nothing you do is ever silent. It ends on its last chord — play it all the way through. SPACE / Z / X = keystroke, A = auto, R = restart, D = meters, ESC = back.`
           : shared
             ? 'Somebody sent you a performance. Press ENTER to watch it play back — a take is a few hundred numbers describing what their hands did, and nothing else.'
-            : 'Your hands are the hammers and the pedal. Every stroke plays the next beat, so the music follows your pace — speed up, drag your heels, stop dead. Play a piece to its final chord and the cat will tell you what it thought.'}
+            : 'Your hands are the hammers and the pedal. Every stroke plays the next beat, so the music follows your pace — speed up, drag your heels, stop dead. Play a piece to its final chord and the cat will tell you what it thought. The scores are complete, and come from published digital editions credited in lib/scores/SOURCES.md.'}
       </p>
     </main>
   )

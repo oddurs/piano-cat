@@ -1,6 +1,7 @@
 // Synthetic hands. A keystroke is a fall and a lift; everything the detector
 // believes about you it has to get from that shape alone.
 
+import { PIECES } from '../lib/pieces'
 import type { Sample } from '../lib/perception'
 
 const ease = (v: number) => v * v * (3 - 2 * v)
@@ -57,3 +58,19 @@ export function fakePiano() {
     allOff: () => {},
   }
 }
+
+/** Pieces by name, because a test that says PIECES[3] breaks the moment
+ *  somebody adds a piece and starts asserting things about a different one. */
+export function piece(id: string) {
+  const p = PIECES.find((x) => x.id === id)
+  if (!p) throw new Error(`no piece called ${id}`)
+  return p
+}
+
+/** The quickest thing to play to its end, for tests about endings. */
+export const SHORTEST = 'chopsticks'
+
+/** A piece whose two hands keep out of each other's register from the first
+ *  bar, for tests that need to tell the staves apart by ear. The Bach prelude
+ *  cannot do this: its hands share every pitch for the first several bars. */
+export const TWO_VOICE = 'minuet-g'
