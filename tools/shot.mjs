@@ -61,7 +61,7 @@ const mute = { play() {}, thud() {}, stir() {}, setPedal() {}, setResonance() {}
 
 function play(idx, seconds, o) {
   const { dyn, mood, vibe, hint = '', tracked = false, height = 0.5, debug = null,
-    countIn = null, over = false, react = null } = o
+    countIn = null, over = false, react = null, reveals = [] } = o
   const piece = PIECES[idx]
   const con = new Conductor(piece, mute)
   const cv = createCanvas(W, H)
@@ -87,6 +87,7 @@ function play(idx, seconds, o) {
     // force a face for the review sheet — these are transient by nature and
     // would otherwise never be sampled
     if (react) con.reaction = { kind: react, age: 0.25 }
+    if (reveals.length && T > seconds - 0.6) for (const r of reveals) ren.reveal(r)
     for (const n of con.drain()) ren.noteFired(n.p, n.vel, piece.accent, n.kind === 'ornament')
     ren.draw(con, frame, DT, mood, { auto: false, vibe, hint, debug, countIn, over })
     T += DT
@@ -155,6 +156,18 @@ sheet('arc', [
   screen((px) => M.drawVerdict(px, { t: 1.1, piece: PIECES[0], report: REPORTS.good, take: 1 })),
   screen((px) => M.drawVerdict(px, { t: 2.3, piece: PIECES[1], report: REPORTS.bad, take: 4 })),
 ])
+// the teaching banners, which appear for two seconds and are otherwise
+// impossible to look at
+sheet('teach', [
+  play(0, 6.4, { dyn: .5, mood: 'happy', vibe: 'TASTEFUL', tracked: true, height: .9,
+    reveals: ['DAMPERS UP - IT ALL RINGS'] }),
+  play(1, 6.4, { dyn: .6, mood: 'calm', vibe: 'SPIRITED', tracked: true, height: .4,
+    reveals: ['ORNAMENT', 'BOTH HANDS = CHORD'] }),
+  play(2, 6.4, { dyn: .4, mood: 'calm', vibe: 'MAESTRO', tracked: true, height: .5,
+    reveals: ['HANDS READY - WAVE TO TAKE OVER'] }),
+  play(3, 6.4, { dyn: .5, mood: 'happy', vibe: 'TASTEFUL', tracked: true, height: .6,
+    reveals: ['YOU HAVE IT'] }),
+])
 sheet('faces', [
   play(0, 6.4, { dyn: .5, mood: 'calm', vibe: 'TASTEFUL', tracked: true, height: .6, react: 'stumble' }),
   play(0, 6.4, { dyn: .5, mood: 'calm', vibe: 'MAESTRO', tracked: true, height: .6, react: 'nailed' }),
@@ -168,8 +181,4 @@ sheet('menu', [
   // had never once been rendered into a sheet
   screen((px) => M.drawLoading(px, { t: 2.4, status: 'warming up the piano...', done: .45 })),
   screen((px) => M.drawMenu(px, { pieces: PIECES, sel: 3, t: 5.0, camWarn: 'NO CAMERA - USE SPACE' })),
-  screen((px) => M.drawCalibrate(px, {
-    t: 1.4, left: .45, accent: PIECES[0].accent,
-    hands: [{ x: .3, y: .3 }, { x: .72, y: .62 }],
-  })),
 ])

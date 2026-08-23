@@ -13,15 +13,13 @@ import {
 import { restingHand, type PlayFrame, type Side } from '@/lib/signal'
 import { Conductor, type Expression } from '@/lib/conductor'
 import { Renderer, setFont, W, H, type CatMood } from '@/lib/render'
-import { drawMenu, drawLoading, drawCalibrate, drawVerdict, menuRowAt } from '@/lib/menu'
+import { drawMenu, drawLoading, drawVerdict, menuRowAt } from '@/lib/menu'
 
 const pixel = Press_Start_2P({ weight: '400', subsets: ['latin'], variable: '--pixel' })
 
-type Screen = 'menu' | 'loading' | 'calibrate' | 'play' | 'verdict'
+type Screen = 'menu' | 'loading' | 'play' | 'verdict'
 /** the piece is yours after this many counted beats, or on your first stroke */
 type CountIn = { left: number; at: number } | null
-/** long enough to reach up and down once, short enough not to be a chore */
-const CALIBRATION = 3.4
 /** let the last chord ring before anyone claps over it */
 const RING_OUT = 2.8
 /** long enough that a trailing stroke cannot skip your own verdict */
@@ -55,7 +53,6 @@ export default function Page() {
   // rest of the session hiding every hint that would actually have helped. On
   // the menu it persists, because that is where you can act on it.
   const warnRef = useRef<{ text: string; until: number } | null>(null)
-  const calUntilRef = useRef(0)
   const takeRef = useRef(1)
   const autoRef = useRef(false)
   const sawFirstRef = useRef(false)
@@ -69,11 +66,19 @@ export default function Page() {
   const [shared, setShared] = useState(false)
   const [copied, setCopied] = useState(false)
   const countRef = useRef<CountIn>(null)
+  /** things we have already shown you once; nobody needs telling twice */
+  const seenRef = useRef<Set<string>>(new Set())
   const overAtRef = useRef(0)
   const clappedRef = useRef(false)
   const verdictAtRef = useRef(0)
 
   const setScreen = (s: Screen) => { screenRef.current = s; setScreenState(s) }
+  /** Say a thing once, at the moment it is true. Nobody reads the caption. */
+  const teach = (key: string, text: string) => {
+    if (seenRef.current.has(key)) return
+    seenRef.current.add(key)
+    renRef.current?.reveal(text)
+  }
   const warn = (text: string | null, secs = 9) => {
     warnRef.current = text ? { text, until: performance.now() / 1000 + secs } : null
   }
@@ -128,10 +133,52 @@ export default function Page() {
     if (!con || screenRef.current !== 'play' || con.finished) return
     // Coming in early is not a mistake, it is you taking the piece over.
     countRef.current = null
-    con.strike(now, strength, side)
+    if (autoRef.current) {
+      autoRef.current = false
+      setAuto(false)
+      renRef.current?.reveal('YOU HAVE IT')
+    }
+    const kind = con.strike(now, strength, side)
+    if (kind === 'ornament') teach('ornament', 'ORNAMENT')
+    if (kind === 'chord') teach('chord', 'BOTH HANDS = CHORD')
     if (!replayRef.current) takeRecRef.current.stroke(now, side, strength)
     sawFirstRef.current = true
   }, [])
+
+  /** Get the camera and the hand model going without anybody waiting on it. */
+  const openEyes = useCallback(async () => {
+    const cam = camRef.current ?? new Camera()
+    camRef.current = cam
+    const per = perRef.current
+    per.sensitivity = sens
+
+    if (!cam.stream) {
+      try {
+        await cam.start()
+        warn(null)
+        cam.onLost = () => { warn('CAMERA LOST - USE SPACE') }
+        cam.onSample = (s) => {
+          const f = per.ingest(s, cam.pixels, cam.mask)
+          frameRef.current = f
+          recRef.current.push({ ...s })
+          if (screenRef.current !== 'play' || replayRef.current) return
+          for (const st of f.strokes) {
+            const at = performance.now() / 1000
+            probeRef.current.add(at - s.capturedAt)   // shutter to sound
+            takeStrike(at, st.strength, st.side)
+          }
+        }
+      } catch (e) {
+        warn((e as Error)?.name === 'NotAllowedError'
+          ? 'CAMERA DECLINED - USE SPACE' : 'NO CAMERA - USE SPACE')
+        return
+      }
+    }
+
+    await cam.loadHands()
+    if (cam.modelNote) warn(cam.modelNote)
+    else if (screenRef.current === 'play') renRef.current?.reveal('HANDS READY - WAVE TO TAKE OVER')
+  }, [sens, takeStrike])
 
   const begin = useCallback(async (p: Piece, watchThis?: Take) => {
     if (screenRef.current !== 'menu') return
@@ -141,52 +188,15 @@ export default function Page() {
     statusRef.current = 'warming up the piano...'
     setScreen('loading')
 
+    // The piano is two megabytes and it is the only thing standing between a
+    // click and a sound. Everything else — the camera, nineteen megabytes of
+    // hand model — happens behind a piece that is already playing.
     const piano = pianoRef.current ?? new Piano()
     pianoRef.current = piano
-    await piano.init((v) => { doneRef.current = v * 0.55 })
+    await piano.init((v) => { doneRef.current = v })
     piano.resume()
 
-    statusRef.current = 'asking for the camera...'
-    const cam = camRef.current ?? new Camera()
-    camRef.current = cam
-    let fresh = false
-    if (!cam.stream) {
-      try {
-        await cam.start()
-        warn(null)
-        fresh = true
-      } catch (e) {
-        warn((e as Error)?.name === 'NotAllowedError'
-          ? 'CAMERA DECLINED - USE SPACE' : 'NO CAMERA - USE SPACE')
-      }
-    }
-
-    if (cam.stream) {
-      statusRef.current = 'teaching the cat to see hands...'
-      await cam.loadHands((v) => { doneRef.current = 0.55 + v * 0.45 })
-      if (cam.modelNote) warn(cam.modelNote)
-    }
-    doneRef.current = 1
-
-    const per = perRef.current
-    per.sensitivity = sens
-    per.reset()
-
-    if (fresh) {
-      cam.onSample = (s) => {
-        const f = per.ingest(s, cam.pixels, cam.mask)
-        frameRef.current = f
-        recRef.current.push({ ...s })
-        if (screenRef.current !== 'play' || autoRef.current) return
-        for (const st of f.strokes) {
-          const now = performance.now() / 1000
-          probeRef.current.add(now - s.capturedAt)   // shutter to sound
-          takeStrike(now, st.strength, st.side)
-        }
-      }
-      cam.onLost = () => { warn('CAMERA LOST - USE SPACE') }
-    }
-
+    const now = performance.now() / 1000
     const con = new Conductor(p, piano)
     conRef.current = con
     setStride(con.stride)
@@ -195,28 +205,29 @@ export default function Page() {
     autoAccRef.current = 0
     clappedRef.current = false
     overAtRef.current = 0
-    countRef.current = { left: p.pulsesPerBar, at: performance.now() / 1000 + 0.7 }
+    seenRef.current.clear()
+    countRef.current = null
     replayRef.current = null
-    takeRecRef.current.start(p.id, performance.now() / 1000)
     probeRef.current.clear()
 
     if (watchThis) {
       sharedRef.current = null
       setShared(false)
       replayRef.current = new TakePlayer(watchThis)
-      countRef.current = null
+      autoRef.current = false
+      setAuto(false)
       setScreen('play')
       return
     }
 
-    if (cam.stream && cam.mode === 'hands') {
-      per.beginCalibration()
-      calUntilRef.current = performance.now() / 1000 + CALIBRATION
-      setScreen('calibrate')
-    } else {
-      setScreen('play')
-    }
-  }, [sens, takeStrike])
+    // The cat starts without you so that something is playing while the rest
+    // loads. Your first stroke takes it off them.
+    takeRecRef.current.start(p.id, now)
+    autoRef.current = true
+    setAuto(true)
+    setScreen('play')
+    void openEyes()
+  }, [openEyes])
 
   const quit = useCallback(() => {
     pianoRef.current?.allOff(0.3)
@@ -307,20 +318,7 @@ export default function Page() {
         })
       } else if (scr === 'loading') {
         drawLoading(ren.px, { t, status: statusRef.current, done: doneRef.current })
-      } else if (scr === 'calibrate') {
-        const f = frameRef.current
-        const hands = (['L', 'R'] as Side[]).filter((s) => f.hands[s].present).map((s) => f.hands[s])
-        drawCalibrate(ren.px, {
-          t,
-          left: Math.max(0, (calUntilRef.current - now) / CALIBRATION),
-          hands,
-          accent: pieceRef.current.accent,
-        })
-        if (now >= calUntilRef.current) {
-          perRef.current.endCalibration()
-          setScreen('play')
-        }
-      } else if (scr === 'verdict') {
+            } else if (scr === 'verdict') {
         const con = conRef.current!
         drawVerdict(ren.px, { t, piece: con.piece, report: con.report, take: takeRef.current })
       } else {
@@ -379,6 +377,8 @@ export default function Page() {
         }
         if (!replayRef.current) takeRecRef.current.sample(now, ex.dyn, ex.height, ex.spread)
         con.update(dt, now, ex)
+        if (con.pedal > 0.62) teach('pedal', 'DAMPERS UP - IT ALL RINGS')
+        if (tracked && (con.engage.L < 0.1 || con.engage.R < 0.1)) teach('rest', 'THAT HAND IS RESTING')
         for (const n of con.drain()) ren.noteFired(n.p, n.vel, con.piece.accent, n.kind === 'ornament')
 
         // --- the ending. Let the last chord ring on its own before the room
@@ -467,11 +467,6 @@ export default function Page() {
           // A link to a take is a link to that take, not to the menu.
           begin(t ? PIECES.find((x) => x.id === t.piece)! : PIECES[selRef.current], t ?? undefined)
         }
-        return
-      }
-      if (screenRef.current === 'calibrate' && (k === 'escape' || k === 'enter' || k === ' ')) {
-        e.preventDefault()
-        calUntilRef.current = 0
         return
       }
       if (screenRef.current === 'verdict') {
@@ -605,9 +600,7 @@ export default function Page() {
             </>
           ) : (
             <span className="tag">
-              {screen === 'loading' ? 'LOADING A REAL GRAND PIANO AND A PAIR OF EYES'
-                : screen === 'calibrate' ? 'REACH UP HIGH, THEN DOWN LOW'
-                  : 'PICK A MASTERPIECE — IT NEEDS YOUR CAMERA'}
+              {screen === 'loading' ? 'LOADING A REAL GRAND PIANO' : 'PICK A MASTERPIECE'}
             </span>
           )}
         </div>

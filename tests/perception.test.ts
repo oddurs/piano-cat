@@ -64,20 +64,30 @@ test('replaying a clip twice gives exactly the same performance', () => {
   assert.deepEqual(a.map((s) => [s.t, s.side]), b.map((s) => [s.t, s.side]))
 })
 
-test('calibration maps this room to a full pedal range', () => {
+test('the pedal range is learned while you play, with no calibration step', () => {
   const p = new Perception()
-  p.beginCalibration()
-  // hands sweep from high (y=0.15) to low (y=0.8)
+  // hands sweep from high (y=0.15) to low (y=0.8) in the course of playing
   const sweep = Array.from({ length: 60 }, (_, i) => {
     const t = i / 30
     const y = 0.15 + (i / 59) * 0.65
     return { t, capturedAt: t, energy: 0, hands: [{ x: 0.5, y, sy: y, spread: 0.5, conf: 1 }] }
   })
   for (const s of sweep) p.ingest(s)
-  p.endCalibration()
 
   const high = p.ingest({ t: 3, capturedAt: 3, energy: 0, hands: [{ x: 0.5, y: 0.15, sy: 0.15, spread: 0.5, conf: 1 }] })
   const low = p.ingest({ t: 3.1, capturedAt: 3.1, energy: 0, hands: [{ x: 0.5, y: 0.8, sy: 0.8, spread: 0.5, conf: 1 }] })
   assert.ok(high.height > 0.9, `hands up should read as pedal down: ${high.height}`)
   assert.ok(low.height < 0.1, `hands down should damp: ${low.height}`)
+})
+
+
+test('a room that is never learned still has a usable pedal', () => {
+  // Somebody who keeps their hands in a narrow band should still be able to
+  // reach both ends of the pedal rather than being stuck at half.
+  const p = new Perception()
+  const at = (t: number, y: number) =>
+    p.ingest({ t, capturedAt: t, energy: 0, hands: [{ x: 0.5, y, sy: y, spread: 0.5, conf: 1 }] })
+  for (let i = 0; i < 30; i++) at(i / 30, 0.5)
+  assert.ok(at(1.1, 0.3).height > 0.75, 'lifting still opens the dampers')
+  assert.ok(at(1.2, 0.72).height < 0.25, 'lowering still closes them')
 })
