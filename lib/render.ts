@@ -1,7 +1,7 @@
 import { GW, GH } from './camera'
 import { dynMark, type Conductor } from './conductor'
 import { clamp, type PlayFrame, type Side } from './signal'
-import { Px } from './px'
+import { calm, Px } from './px'
 import { drawCatBody, drawCatPaws, drawCandelabra, drawMetronome, drawPianoTop, type CatMood, type CatState } from './cat'
 
 export { setFont } from './px'
@@ -39,6 +39,11 @@ export type Chrome = {
   auto: boolean
   vibe: string
   hint: string
+  /** how loud the instrument is actually being asked to play. Not the same
+   *  as what the camera sees: when the cat is playing to itself, or a take is
+   *  being replayed, the camera may be seeing nothing at all while the piece
+   *  is in full flow. The meters should show the music. */
+  level?: number
   /** beats left in the count-in, or null once the piece is yours */
   countIn?: number | null
   /** the last chord is ringing and the performance is over */
@@ -99,6 +104,7 @@ export class Renderer {
 
   noteFired(midi: number, vel: number, accent: string, ornament = false) {
     this.keyLight.set(midi, Math.max(this.keyLight.get(midi) ?? 0, (ornament ? 0.2 : 0.35) + vel * 0.65))
+    if (calm()) return                      // the key still lights; the sparks go
     const k = keyRect(midi)
     const n = ornament ? 1 : vel > 0.7 ? 3 : vel > 0.4 ? 2 : 1
     for (let i = 0; i < n; i++) {
@@ -445,12 +451,13 @@ export class Renderer {
     px.r(0, FOOT_TOP, W, H - FOOT_TOP, '#120e1a')
     px.r(0, FOOT_TOP, W, 1, '#2b2440')
 
-    px.textS(dynMark(f.dyn), 4, FOOT_TOP + 6, px.mix('#6f6a86', p.accent, f.dyn), '#000000')
+    const level = o.level ?? f.dyn
+    px.textS(dynMark(level), 4, FOOT_TOP + 6, px.mix('#6f6a86', p.accent, level), '#000000')
 
     // segmented VU meter — chunky blocks read better than a smooth bar
     const mx = 44, seg = 10, sw = 6
     for (let i = 0; i < seg; i++) {
-      const on = f.dyn > (i + 0.5) / seg
+      const on = level > (i + 0.5) / seg
       const hot = i >= seg - 2
       px.r(mx + i * (sw + 1), FOOT_TOP + 6, sw, 7,
         on ? (hot ? '#ff6a5a' : p.accent) : '#241d33')
@@ -492,7 +499,7 @@ export class Renderer {
       // what the browser adds after we hand the note over. Not ours to fix,
       // but reporting shutter-to-schedule as shutter-to-sound was flattering.
       `OUT ${d.out.toFixed(0)}MS`,
-      `DYN ${f.dyn.toFixed(1)}`,
+      `DYN ${(f.dyn).toFixed(1)}`,
       `L${con.engage.L.toFixed(1)}R${con.engage.R.toFixed(1)}`,
     ]
     const w = Math.max(...lines.map((l) => px.textW(l, 8))) + 6

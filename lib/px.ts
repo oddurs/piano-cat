@@ -4,6 +4,17 @@
 let FONT = '"Press Start 2P", ui-monospace, monospace'
 export const setFont = (f: string) => { FONT = f }
 
+/**
+ * Somebody who has asked their machine for less movement gets less of it.
+ * Not none: the instrument moving is the instrument working, and a piano that
+ * holds still is broken rather than considerate. What goes is the decoration
+ * — drifting notes, bouncing titles, flickering candles, sparks — none of
+ * which is telling anybody anything.
+ */
+let CALM = false
+export const setCalm = (v: boolean) => { CALM = v }
+export const calm = () => CALM
+
 export class Px {
   constructor(public cx: CanvasRenderingContext2D) {}
 

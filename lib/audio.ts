@@ -124,6 +124,16 @@ export class Piano {
 
   resume() { if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume() }
 
+  /** How loud the whole instrument is. A thing that makes noise on somebody
+   *  else's machine should always have one of these. */
+  setVolume(v: number) {
+    if (!this.ready) return
+    this.master.gain.setTargetAtTime(Math.max(0, Math.min(1, v)) * 0.85, this.ctx.currentTime, 0.04)
+  }
+
+  /** Stop, and be able to pick up exactly where you were. */
+  async pause() { this.allOff(0.12); this.bed?.mute(); await this.ctx?.suspend?.().catch?.(() => {}) }
+
   /**
    * What the browser adds between us scheduling a sample and a speaker moving.
    * We cannot remove it, but the number belongs on the meters next to the one

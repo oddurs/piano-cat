@@ -1,4 +1,4 @@
-import type { Px } from './px'
+import { calm, type Px } from './px'
 
 export type CatMood = 'sleep' | 'calm' | 'happy' | 'wild'
 export type CatReaction = 'stumble' | 'nailed' | 'startled' | 'bow'
@@ -206,6 +206,7 @@ export function drawCatPaws(px: Px, s: CatState, keyTop: number, hand: -1 | 1, s
 // ------------------------------------------------------------------- props
 
 export function drawCandelabra(px: Px, x: number, base: number, t: number) {
+  if (calm()) t = 0                          // the flames stop guttering
   px.r(x - 6, base - 3, 13, 4, '#7a5a1c')
   px.r(x - 4, base - 2, 9, 2, '#c79a34')
   px.r(x - 1, base - 14, 3, 12, '#c79a34')
