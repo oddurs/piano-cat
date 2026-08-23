@@ -73,6 +73,23 @@ const MAX_CATCH_UP = 0.25
  */
 const SCHED_AHEAD = 0.045
 
+/**
+ * What a pianist does to a chord that a note player does not.
+ *
+ * The top of a texture is the tune and everything under it is accompaniment,
+ * so the top note is played louder and — this is the part that sounds like a
+ * person rather than a machine — very slightly first. Ten milliseconds is
+ * far too small to hear as a spread chord and is most of what separates a
+ * played chord from a struck one. Inner voices sit back; the bass holds its
+ * own, because it is carrying the harmony.
+ */
+const TOP_GAIN = 1.2
+const INNER_GAIN = 0.8
+const BASS_GAIN = 0.96
+const MELODY_LEAD = 0.011
+/** the last note before a breath gets a little longer, the way a phrase ends */
+const AGOGIC = 1.18
+
 /** Notes that arrive in a clump get spread by this much, per distinct beat... */
 const FLOURISH = 0.018
 /** ...but the whole flourish still has to read as one gesture. */
@@ -547,15 +564,44 @@ export class Conductor {
       return slots
     })
     const spread = slots > 0 ? Math.min(FLOURISH_MAX, slots * FLOURISH) / slots : 0
-    for (let i = 0; i < due.length; i++) {
-      this.fire(due[i], now, ex, Math.max(0, slotOf[i] * spread - this.lag))
+    const going: { n: NoteEv; at: number }[] = [
+      ...due.map((n, i) => ({ n, at: Math.max(0, slotOf[i] * spread - this.lag) })),
+      ...soon.map((n) => ({ n, at: Math.max(0, dueAt(n.b) - now - this.lag) })),
+    ]
+
+    // Which voice each note is, decided across everything sounding together.
+    const together = new Map<number, NoteEv[]>()
+    for (const g of going) {
+      const k = +g.n.b.toFixed(4)
+      const at = together.get(k) ?? []
+      at.push(g.n)
+      together.set(k, at)
     }
-    for (const n of soon) {
-      this.fire(n, now, ex, Math.max(0, dueAt(n.b) - now - this.lag))
+    const nextCut = this.gestureAt(this.gi + this.wave) - (this.pos - head)
+
+    for (const g of going) {
+      const chord = together.get(+g.n.b.toFixed(4))!
+      const top = chord.reduce((a, b) => (b.p > a.p ? b : a))
+      const isTop = g.n === top && chord.length > 1
+      const role = chord.length === 1 ? 'alone'
+        : isTop ? 'top'
+          : g.n.h === -1 ? 'bass' : 'inner'
+      // the tune arrives first; everything under it follows a moment later
+      const lead = chord.length > 1 && !isTop ? MELODY_LEAD : 0
+      // and the note that ends a gesture is allowed to breathe
+      const last = g.n.b + g.n.d >= nextCut - 1e-6
+      this.fire(g.n, now, ex, g.at + lead, role, last ? AGOGIC : 1)
     }
   }
 
-  private fire(n: NoteEv, now: number, ex: Expression, delay: number) {
+  private fire(
+    n: NoteEv,
+    now: number,
+    ex: Expression,
+    delay: number,
+    role: 'top' | 'inner' | 'bass' | 'alone' = 'alone',
+    hold = 1,
+  ) {
     const side = staffOf(n)
     const eng = this.engage[side]
 
@@ -580,7 +626,9 @@ export class Conductor {
     const isBass = n.p < 60
     const scatter = 1 + (Math.random() - 0.5) * ex.wild * 0.55
 
-    const vel = clamp(n.v * accent * hit * level * lift * (0.35 + eng * 0.75) * scatter, 0.05, 1)
+    const voice = role === 'top' ? TOP_GAIN : role === 'inner' ? INNER_GAIN
+      : role === 'bass' ? BASS_GAIN : 1
+    const vel = clamp(n.v * accent * hit * level * lift * voice * (0.35 + eng * 0.75) * scatter, 0.05, 1)
 
     // Wider hands, wider instrument.
     const width = 0.6 + ex.spread * 0.7
@@ -588,7 +636,7 @@ export class Conductor {
     this.piano.play({
       midi: n.p,
       vel,
-      dur: n.d * secPerPulse,
+      dur: n.d * hold * secPerPulse,
       release: this.piece.release * (0.75 + ex.dyn * 0.5),
       pan: ((isBass ? -0.22 : 0.18) * width) + hand,
       at: delay,
