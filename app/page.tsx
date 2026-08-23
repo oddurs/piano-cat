@@ -68,6 +68,8 @@ export default function Page() {
   const countRef = useRef<CountIn>(null)
   /** things we have already shown you once; nobody needs telling twice */
   const seenRef = useRef<Set<string>>(new Set())
+  const previewRef = useRef<{ con: Conductor; acc: number; side: Side } | null>(null)
+  const [listening, setListening] = useState(false)
   const overAtRef = useRef(0)
   const clappedRef = useRef(false)
   const verdictAtRef = useRef(0)
@@ -144,6 +146,36 @@ export default function Page() {
     if (!replayRef.current) takeRecRef.current.stroke(now, side, strength)
     sawFirstRef.current = true
   }, [])
+
+  const stopPreview = useCallback(() => {
+    if (!previewRef.current) return
+    previewRef.current = null
+    setListening(false)
+    pianoRef.current?.allOff(0.3)
+    pianoRef.current?.setPedal(0)
+  }, [])
+
+  /**
+   * Hear a piece before committing to it. Four titles and a joke told you
+   * nothing about what you were signing up for, or how fast to wave.
+   */
+  const listen = useCallback(async () => {
+    if (previewRef.current) { stopPreview(); return }
+    const piano = pianoRef.current ?? new Piano()
+    pianoRef.current = piano
+    if (!piano.ready) {
+      statusRef.current = 'fetching the piano...'
+      setListening(true)
+      await piano.init((v) => { doneRef.current = v })
+    }
+    piano.resume()
+    if (screenRef.current !== 'menu') { setListening(false); return }
+    const p = PIECES[selRef.current]
+    const con = new Conductor(p, piano)
+    con.loop = true
+    previewRef.current = { con, acc: 0, side: 'R' }
+    setListening(true)
+  }, [stopPreview])
 
   /** Get the camera and the hand model going without anybody waiting on it. */
   const openEyes = useCallback(async () => {
@@ -310,11 +342,25 @@ export default function Page() {
 
       const scr = screenRef.current
       if (scr === 'menu') {
+        // the cat playing to itself while you decide
+        const pv = previewRef.current
+        if (pv) {
+          pv.acc += dt
+          while (pv.acc >= pv.con.period) {
+            pv.acc -= pv.con.period
+            pv.side = pv.side === 'L' ? 'R' : 'L'
+            pv.con.strike(now, 0.6, pv.side)
+          }
+          pv.con.update(dt, now, PREVIEW_EX)
+          pv.con.drain()
+        }
         drawMenu(ren.px, {
           pieces: PIECES, sel: selRef.current, t,
           camWarn: sharedRef.current
             ? 'SOMEONE SENT YOU A TAKE - ENTER TO WATCH'
-            : warnRef.current?.text ?? null,
+            : previewRef.current
+              ? 'LISTENING   P STOP   ENTER TO PLAY IT'
+              : warnRef.current?.text ?? null,
         })
       } else if (scr === 'loading') {
         drawLoading(ren.px, { t, status: statusRef.current, done: doneRef.current })
@@ -456,13 +502,16 @@ export default function Page() {
       const k = e.key.toLowerCase()
       if (screenRef.current === 'menu') {
         if (k === 'arrowdown' || k === 'arrowright') {
-          e.preventDefault(); sharedRef.current = null; setShared(false)
+          e.preventDefault(); sharedRef.current = null; setShared(false); stopPreview()
           selRef.current = (selRef.current + 1) % PIECES.length
         } else if (k === 'arrowup' || k === 'arrowleft') {
-          e.preventDefault(); sharedRef.current = null; setShared(false)
+          e.preventDefault(); sharedRef.current = null; setShared(false); stopPreview()
           selRef.current = (selRef.current + PIECES.length - 1) % PIECES.length
+        } else if (k === 'p') {
+          e.preventDefault(); void listen()
         } else if (k === 'enter' || k === ' ') {
           e.preventDefault()
+          stopPreview()
           const t = sharedRef.current
           // A link to a take is a link to that take, not to the menu.
           begin(t ? PIECES.find((x) => x.id === t.piece)! : PIECES[selRef.current], t ?? undefined)
@@ -503,7 +552,7 @@ export default function Page() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [begin, quit, restart, encore, takeStrike, watch, share])
+  }, [begin, quit, restart, encore, takeStrike, watch, share, listen, stopPreview])
 
   // A backgrounded tab gets no video frames, so the follower would wake up to
   // a several-second gap and lurch. Put the instrument down instead.
@@ -532,12 +581,13 @@ export default function Page() {
     if (screenRef.current !== 'menu') return
     const { x, y } = canvasPoint(e)
     const i = menuRowAt(x, y, PIECES.length)
-    if (i >= 0) selRef.current = i
+    if (i >= 0 && i !== selRef.current) { selRef.current = i; stopPreview() }
   }
   const onClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (screenRef.current === 'menu') {
       const { x, y } = canvasPoint(e)
       const i = menuRowAt(x, y, PIECES.length)
+      stopPreview()
       begin(PIECES[i >= 0 ? i : selRef.current])
     } else if (screenRef.current === 'verdict') {
       if (performance.now() / 1000 - verdictAtRef.current >= VERDICT_GRACE) encore()
@@ -599,9 +649,16 @@ export default function Page() {
               <span className="knob"><b>TAKE</b><i>{take}</i></span>
             </>
           ) : (
-            <span className="tag">
-              {screen === 'loading' ? 'LOADING A REAL GRAND PIANO' : 'PICK A MASTERPIECE'}
-            </span>
+            <>
+              {screen === 'menu' && (
+                <button className={`btn ${listening ? 'on' : ''}`} onClick={() => void listen()}>
+                  {listening ? 'STOP' : 'LISTEN'}
+                </button>
+              )}
+              <span className="tag">
+                {screen === 'loading' ? 'LOADING A REAL GRAND PIANO' : 'PICK A MASTERPIECE'}
+              </span>
+            </>
           )}
         </div>
 
@@ -617,6 +674,12 @@ export default function Page() {
       </p>
     </main>
   )
+}
+
+/** what the cat sounds like playing to itself: even, unhurried, no pedal */
+const PREVIEW_EX: Expression = {
+  dyn: 0.5, wild: 0.05, height: 0.35, spread: 0.5, travel: 0,
+  present: { L: false, R: false }, x: { L: 0.3, R: 0.7 }, twoHanded: false,
 }
 
 const BLANK = new Uint8Array(GW * GH)

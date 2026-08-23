@@ -6,9 +6,11 @@ import { drawCatBody, drawCandelabra, type CatState } from './cat'
 export const MW = 320
 export const MH = 180
 
-const ROW_TOP = 52
-const ROW_H = 17
-const KEYS_TOP = 158
+// Laid out for the length of the list, not for a number that was true once:
+// seven rows and a blurb have to fit above the keys.
+const ROW_TOP = 38
+const ROW_H = 14
+const KEYS_TOP = 164
 
 /** greedy word wrap to a pixel width — the pixel font has no ellipsis and
  *  nothing here is short enough to trust */
@@ -63,6 +65,18 @@ function drawIcon(px: Px, id: string, x: number, y: number, c: string, t: number
   } else if (id === 'moonlight') {
     px.blob(x + 2, y + 1, 9, 10, c, 3); px.blob(x + 5, y, 8, 10, '#0b0910', 3)
     px.r(x + 1, y + 2, 1, 1, '#fff'); px.r(x + 3, y + 9, 1, 1, '#fff')
+  } else if (id === 'chopsticks') {
+    const b = Math.sin(t * 9) > 0 ? 0 : 1          // two hands chopping
+    px.r(x + 1, y + 2 + b, 4, 7, c); px.r(x + 7, y + 4 - b, 4, 7, c)
+    px.r(x + 1, y + 9 + b, 4, 2, '#f8e6c4'); px.r(x + 7, y + 11 - b, 4, 2, '#f8e6c4')
+  } else if (id === 'entertainer') {
+    px.r(x + 2, y + 8, 8, 3, c)                    // a straw boater
+    px.r(x + 3, y + 3, 6, 5, c)
+    px.r(x + 3, y + 6, 6, 1, '#f8e6c4')
+  } else if (id === 'mountain-king') {
+    for (let i = 0; i < 5; i++) px.r(x + 1 + i, y + 11 - i * 2, 1, i * 2 + 1, c)
+    px.r(x + 6, y + 1, 5, 11, c)                   // a rising crag
+    px.r(x + 7, y + 1, 3, 2, '#ffffff')
   } else {
     const b = Math.sin(t * 5) > 0 ? 0 : 1
     px.r(x + 3, y + 1 + b, 2, 6, c); px.r(x + 8, y + b, 2, 6, c)
@@ -79,8 +93,8 @@ export function drawMenu(px: Px, o: {
 
   // --- title
   const bounce = Math.round(Math.sin(o.t * 2) * 2)
-  px.textCS('PIANO CAT', MW / 2, 10 + bounce, '#ffd76a', '#7a3d00', 16, 2)
-  px.a(0.85).textC('mime a masterpiece at your webcam', MW / 2, 32, '#a49dc4')
+  px.textCS('PIANO CAT', MW / 2, 4 + bounce, '#ffd76a', '#7a3d00', 16, 2)
+  px.a(0.85).textC('mime a masterpiece at your webcam', MW / 2, 26, '#a49dc4')
   px.reset
 
   // --- piece rows
@@ -90,36 +104,28 @@ export function drawMenu(px: Px, o: {
     if (on) {
       px.panel(16, y, MW - 32, ROW_H - 2, '#1d1636', px.mix(piece.accent2, '#ffffff', .35), '#0d0a18')
       const wob = Math.round(Math.sin(o.t * 6) * 1)
-      px.r(10 + wob, y + 5, 4, 4, piece.accent)      // paw cursor
-      px.r(8 + wob, y + 3, 2, 2, piece.accent)
-      px.r(12 + wob, y + 2, 2, 2, piece.accent)
+      px.r(10 + wob, y + 4, 4, 4, piece.accent)      // paw cursor
+      px.r(8 + wob, y + 2, 2, 2, piece.accent)
+      px.r(12 + wob, y + 1, 2, 2, piece.accent)
     }
-    drawIcon(px, piece.id, 22, y + 2, on ? piece.accent : '#5d5878', o.t)
-    px.text(piece.title.toUpperCase(), 40, y + 5, on ? '#ffffff' : '#8a83aa')
-    px.textR(piece.short.toUpperCase(), MW - 22, y + 5, on ? piece.accent : '#4c4763')
+    drawIcon(px, piece.id, 22, y, on ? piece.accent : '#5d5878', o.t)
+    px.text(piece.title.toUpperCase(), 40, y + 3, on ? '#ffffff' : '#8a83aa')
+    px.textR(piece.short.toUpperCase(), MW - 22, y + 3, on ? piece.accent : '#4c4763')
   })
 
   // --- blurb for the highlighted piece
   const lines = wrap(px, p.blurb, MW - 40)
-  lines.slice(0, 2).forEach((l, i) => px.a(0.9).textC(l, MW / 2, 124 + i * 10, p.accent))
+  lines.slice(0, 2).forEach((l, i) => px.a(0.9).textC(l, MW / 2, 136 + i * 9, p.accent))
   px.reset
 
-  const hint = o.camWarn ?? '\u25b2\u25bc PICK   ENTER TO PLAY'
-  px.a(0.7 + Math.sin(o.t * 4) * 0.3).textC(hint, MW / 2, 146, o.camWarn ? '#ff8f7a' : '#cfc7ee')
+  const hint = o.camWarn ?? '\u25b2\u25bc PICK   P LISTEN   ENTER PLAY'
+  px.a(0.7 + Math.sin(o.t * 4) * 0.3).textC(hint, MW / 2, 154, o.camWarn ? '#ff8f7a' : '#cfc7ee')
   px.reset
 
-  // --- a strip of keys along the bottom with two paws on them
+  // Keys along the bottom. The two paws that used to sit on them were drawn
+  // when this menu had four rows; with seven they sit on top of the hint line,
+  // and a decoration that covers the instructions is not a decoration.
   drawMiniKeys(px, o.t, p.accent)
-  const cx = MW - 38
-  for (const side of [-1, 1] as const) {
-    const lx = cx + side * 15 - 6
-    const lift = side < 0 ? (Math.sin(o.t * 3) > 0.5 ? 2 : 0) : (Math.sin(o.t * 3 + 2) > 0.5 ? 2 : 0)
-    px.blob(lx - 1, KEYS_TOP - 13, 14, 13 - lift, '#1b1009', 4)
-    px.blob(lx, KEYS_TOP - 12, 12, 11 - lift, '#f3ae63', 3)
-    px.blob(lx - 2, KEYS_TOP - 2 - lift, 16, 9, '#1b1009', 3)
-    px.blob(lx - 1, KEYS_TOP - 1 - lift, 14, 7, '#f8e6c4', 2)
-    for (const tx of [2, 6, 10]) px.r(lx - 1 + tx, KEYS_TOP + 2 - lift, 1, 4, '#ac5f27')
-  }
 }
 
 function drawMiniKeys(px: Px, t: number, accent: string) {
