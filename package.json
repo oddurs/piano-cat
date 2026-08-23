@@ -37,7 +37,8 @@
     "typecheck": "tsc --noEmit",
     "test": "rm -rf .test-build && tsc -p tsconfig.test.json && node --test \".test-build/tests/*.test.js\"",
     "shot": "node tools/shot.mjs",
-    "drive": "node tools/drive.mjs"
+    "drive": "node tools/drive.mjs",
+    "probe": "node tools/audio-probe.mjs"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.0.1",

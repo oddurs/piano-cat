@@ -181,6 +181,7 @@ export default function Page() {
       await piano.init((v) => { doneRef.current = v })
     }
     piano.resume()
+    exposeForProbe(piano)
     if (screenRef.current !== 'menu') { setListening(false); return }
     const p = PIECES[selRef.current]
     const con = new Conductor(p, piano)
@@ -239,6 +240,7 @@ export default function Page() {
     pianoRef.current = piano
     await piano.init((v) => { doneRef.current = v })
     piano.resume()
+    exposeForProbe(piano)
 
     const now = performance.now() / 1000
     const con = new Conductor(p, piano)
@@ -698,6 +700,19 @@ export default function Page() {
       </p>
     </main>
   )
+}
+
+/**
+ * Hand the instrument to tools/audio-probe.mjs, and only ever to that. A
+ * claim about how a fortissimo differs from a pianissimo should be measured
+ * rather than asserted, and measuring it means reaching the real graph — but
+ * a permanent handle on the audio engine is not something a page should carry
+ * around, so it appears only when explicitly asked for by query string.
+ */
+function exposeForProbe(piano: Piano) {
+  if (typeof window === 'undefined') return
+  if (!new URLSearchParams(window.location.search).has('probe')) return
+  ;(window as unknown as { __piano?: Piano }).__piano = piano
 }
 
 /** what the cat sounds like playing to itself: even, unhurried, no pedal */
