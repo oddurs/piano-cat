@@ -287,3 +287,47 @@ test('the verdict reflects how it was actually played', () => {
   assert.ok(steadyRun.con.report.strokes > 0)
   assert.ok(steadyRun.con.report.grade.length > 0)
 })
+
+// -------------------------------------------------------- frame independence
+
+/** Play an identical performance while pretending to be a given display. */
+function atFrameRate(piece: Piece, fps: number) {
+  const piano = fakePiano()
+  const con = new Conductor(piece, piano as unknown as never)
+  const dt = 1 / fps
+  const per = strokePeriod(piece)
+  const hits = steady(Math.ceil(piece.loopAt / piece.stride) + 2, per)
+  let t = 0
+  let i = 0
+  while (!con.finished && t < hits[hits.length - 1].t + 4) {
+    t += dt
+    // strikes land at their own moment, not the frame's — the point is to
+    // isolate what the follower does with the time between them
+    while (i < hits.length && hits[i].t <= t) { con.strike(hits[i].t, 0.6, hits[i].side); i++ }
+    con.update(dt, t, EX)
+  }
+  return { notes: piano.played.map((p) => p.midi), finished: con.finished }
+}
+
+test('the instrument does not play differently on a different display', () => {
+  for (const piece of PIECES) {
+    const slow = atFrameRate(piece, 30)
+    const normal = atFrameRate(piece, 60)
+    const fast = atFrameRate(piece, 144)
+    assert.ok(slow.finished && normal.finished && fast.finished, `${piece.id} did not finish at every rate`)
+    assert.deepEqual(normal.notes, slow.notes, `${piece.id}: 30Hz played a different piece to 60Hz`)
+    assert.deepEqual(normal.notes, fast.notes, `${piece.id}: 144Hz played a different piece to 60Hz`)
+  }
+})
+
+test('a stall does not make the follower bolt to catch up', () => {
+  const piano = fakePiano()
+  const con = new Conductor(bach, piano as unknown as never)
+  con.strike(0, 0.6, 'R')
+  con.update(1 / 60, 0, EX)
+  con.strike(p0, 0.6, 'L')
+  con.update(1 / 60, p0, EX)
+  const before = con.pos
+  con.update(9, p0 + 9, EX)          // nine seconds in a hidden tab
+  assert.ok(con.pos - before < 2, `the playhead jumped ${(con.pos - before).toFixed(2)} pulses on resume`)
+})

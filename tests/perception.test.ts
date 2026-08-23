@@ -91,3 +91,23 @@ test('a room that is never learned still has a usable pedal', () => {
   assert.ok(at(1.1, 0.3).height > 0.75, 'lifting still opens the dampers')
   assert.ok(at(1.2, 0.72).height < 0.25, 'lowering still closes them')
 })
+
+test('the pedal range is learned at the same speed on any display', () => {
+  const learn = (fps: number) => {
+    const p = new Perception()
+    const dt = 1 / fps
+    for (let i = 0; i * dt < 2; i++) {
+      const t = i * dt
+      // hold the hands high for two seconds
+      p.ingest({ t, capturedAt: t, energy: 0, hands: [{ x: 0.5, y: 0.18, sy: 0.18, spread: 0.5, conf: 1 }] })
+    }
+    // then read where the middle of the range now sits
+    return p.ingest({
+      t: 2.1, capturedAt: 2.1, energy: 0,
+      hands: [{ x: 0.5, y: 0.45, sy: 0.45, spread: 0.5, conf: 1 }],
+    }).height
+  }
+  const a = learn(30), b = learn(60), c = learn(144)
+  assert.ok(Math.abs(a - b) < 0.02, `30Hz gave ${a.toFixed(3)}, 60Hz gave ${b.toFixed(3)}`)
+  assert.ok(Math.abs(b - c) < 0.02, `60Hz gave ${b.toFixed(3)}, 144Hz gave ${c.toFixed(3)}`)
+})
