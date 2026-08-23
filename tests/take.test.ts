@@ -4,7 +4,7 @@ import { TakePlayer, TakeRecorder, decodeTake, encodeTake, type Take } from '../
 import { Conductor, type Report } from '../lib/conductor'
 import { PIECES } from '../lib/pieces'
 import type { Side } from '../lib/signal'
-import { fakePiano } from './helpers'
+import { fakePiano, strokesToFinish } from './helpers'
 
 const report: Report = {
   steadiness: 0.81, range: 0.44, notes: 312, strokes: 80, bpm: 61,
@@ -102,7 +102,7 @@ test('a replay drives the piece all the way to its ending', () => {
   // poll in a browser answers that badly; this answers it exactly.
   const piece = PIECES[3]                      // the shortest one
   const per = 60 / piece.pulseBpm
-  const strokes = Array.from({ length: piece.loopAt + 6 }, (_, i) => ({
+  const strokes = Array.from({ length: strokesToFinish(piece) + 4 }, (_, i) => ({
     t: +(i * per).toFixed(3),
     side: (i % 2 ? 'R' : 'L') as Side,
     strength: 0.7,

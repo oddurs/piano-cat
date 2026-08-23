@@ -70,6 +70,12 @@ export function piece(id: string) {
 /** The quickest thing to play to its end, for tests about endings. */
 export const SHORTEST = 'chopsticks'
 
+/** How many strokes of a hand it takes to play a piece through. One stroke is
+ *  one gesture now, not a fixed number of pulses, so this has to ask the plan. */
+export function strokesToFinish(p: { gestures: number[]; stride: number }) {
+  return Math.ceil(p.gestures.length / p.stride) + 4
+}
+
 /** A piece whose two hands keep out of each other's register from the first
  *  bar, for tests that need to tell the staves apart by ear. The Bach prelude
  *  cannot do this: its hands share every pitch for the first several bars. */
