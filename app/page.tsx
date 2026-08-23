@@ -13,6 +13,8 @@ import {
 import { restingHand, type PlayFrame, type Side } from '@/lib/signal'
 import { Conductor, type Expression } from '@/lib/conductor'
 import { Renderer, setFont, W, H, type CatMood } from '@/lib/render'
+import { setCalm } from '@/lib/px'
+import { loadPrefs, savePrefs } from '@/lib/prefs'
 import { drawMenu, drawLoading, drawVerdict, menuRowAt } from '@/lib/menu'
 
 const pixel = Press_Start_2P({ weight: '400', subsets: ['latin'], variable: '--pixel' })
@@ -33,6 +35,9 @@ export default function Page() {
   const [sens, setSens] = useState(1)
   const [stride, setStride] = useState(1)
   const [take, setTake] = useState(1)
+  const [volume, setVolume] = useState(0.85)
+  const [paused, setPaused] = useState(false)
+  const pausedRef = useRef(false)
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const pianoRef = useRef<Piano | null>(null)
@@ -48,11 +53,6 @@ export default function Page() {
   const selRef = useRef(0)
   const statusRef = useRef('')
   const doneRef = useRef(0)
-  // A warning is news, not a permanent fixture. On the play screen it expires,
-  // because a stale 'CAMERA DECLINED' used to sit in the hint panel for the
-  // rest of the session hiding every hint that would actually have helped. On
-  // the menu it persists, because that is where you can act on it.
-  const warnRef = useRef<{ text: string; until: number } | null>(null)
   const takeRef = useRef(1)
   const autoRef = useRef(false)
   const sawFirstRef = useRef(false)
@@ -65,6 +65,10 @@ export default function Page() {
   const sharedRef = useRef<Take | null>(null)
   const [shared, setShared] = useState(false)
   const [copied, setCopied] = useState(false)
+  /** what just changed, for anyone listening rather than looking */
+  const [said, setSaid] = useState('')
+  /** what the overlay is currently saying, if anything */
+  const [sheet, setSheet] = useState<'none' | 'camera' | 'denied' | 'nocam' | 'slow' | 'lost' | 'help'>('none')
   const countRef = useRef<CountIn>(null)
   /** things we have already shown you once; nobody needs telling twice */
   const seenRef = useRef<Set<string>>(new Set())
@@ -83,17 +87,49 @@ export default function Page() {
     seenRef.current.add(key)
     renRef.current?.reveal(text)
   }
-  const warn = (text: string | null, secs = 9) => {
-    warnRef.current = text ? { text, until: performance.now() / 1000 + secs } : null
-  }
-  const liveWarn = (now: number) => {
-    const w = warnRef.current
-    return w && now <= w.until ? w.text : null
-  }
   useEffect(() => { autoRef.current = auto }, [auto])
   useEffect(() => { perRef.current.sensitivity = sens }, [sens])
   useEffect(() => { conRef.current?.setStride(stride) }, [stride])
   useEffect(() => { setFont(`${pixel.style.fontFamily}, ui-monospace, monospace`) }, [])
+
+  // What you set last time, so you do not set it again every time.
+  useEffect(() => {
+    const p = loadPrefs()
+    setSens(p.sens)
+    setStride(p.wave)
+    setVolume(p.volume)
+    const i = PIECES.findIndex((x) => x.id === p.piece)
+    if (i >= 0) selRef.current = i
+  }, [])
+  useEffect(() => { savePrefs({ sens, wave: stride, volume }) }, [sens, stride, volume])
+  useEffect(() => { pianoRef.current?.setVolume(volume) }, [volume])
+
+  // Somebody who has asked for less movement gets less of it, and gets it
+  // again if they change their mind mid-session.
+  useEffect(() => {
+    const m = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const apply = () => setCalm(m.matches)
+    apply()
+    m.addEventListener('change', apply)
+    return () => m.removeEventListener('change', apply)
+  }, [])
+
+  // The tab says what you are doing, not just where you are. A row of
+  // identical tabs called "Piano Cat" is no use to somebody with fifteen of
+  // them open, which is everybody.
+  useEffect(() => {
+    document.title = screen === 'play' && piece ? `${piece.title} · Piano Cat`
+      : screen === 'verdict' && piece ? `${piece.title} — finished · Piano Cat`
+        : 'Piano Cat'
+    setSaid(
+      screen === 'menu' ? 'Choosing a piece.'
+        : screen === 'loading' ? 'Loading the piano.'
+          : screen === 'play' && piece ? `Playing ${piece.title} by ${piece.composer}.`
+            : screen === 'verdict' && conRef.current
+              ? `Finished. ${conRef.current.report.grade}. ${conRef.current.report.line}.`
+              : '',
+    )
+  }, [screen, piece])
 
   // Somebody sent you a performance. It is a few hundred numbers in the link.
   // Also listened for on hashchange, because pasting a link into a tab that
@@ -144,7 +180,7 @@ export default function Page() {
   // is the one place in the app where a frame is worth saving.
   const takeStrike = useCallback((now: number, strength: number, side: Side) => {
     const con = conRef.current
-    if (!con || screenRef.current !== 'play' || con.finished) return
+    if (!con || screenRef.current !== 'play' || con.finished || pausedRef.current) return
     // Coming in early is not a mistake, it is you taking the piece over.
     countRef.current = null
     if (autoRef.current) {
@@ -199,9 +235,10 @@ export default function Page() {
 
     if (!cam.stream) {
       try {
+        setSheet('none')
         await cam.start()
-        warn(null)
-        cam.onLost = () => { warn('CAMERA LOST - USE SPACE') }
+        savePrefs({ camera: true })
+        cam.onLost = () => { setSheet('lost') }
         cam.onSample = (s) => {
           const f = per.ingest(s, cam.pixels, cam.mask)
           frameRef.current = f
@@ -214,15 +251,14 @@ export default function Page() {
           }
         }
       } catch (e) {
-        warn((e as Error)?.name === 'NotAllowedError'
-          ? 'CAMERA DECLINED - USE SPACE' : 'NO CAMERA - USE SPACE')
+        setSheet((e as Error)?.name === 'NotAllowedError' ? 'denied' : 'nocam')
         return
       }
     }
 
     exposeForProbe({ cam, probe: probeRef.current })
     await cam.loadHands()
-    if (cam.modelNote) warn(cam.modelNote)
+    if (cam.modelNote) setSheet('slow')
     else if (screenRef.current === 'play') renRef.current?.reveal('HANDS READY - WAVE TO TAKE OVER')
   }, [sens, takeStrike])
 
@@ -230,6 +266,7 @@ export default function Page() {
     if (screenRef.current !== 'menu') return
     setPiece(p)
     pieceRef.current = p
+    savePrefs({ piece: p.id })
     doneRef.current = 0
     statusRef.current = 'warming up the piano...'
     setScreen('loading')
@@ -241,6 +278,7 @@ export default function Page() {
     pianoRef.current = piano
     await piano.init((v) => { doneRef.current = v })
     piano.resume()
+    piano.setVolume(volume)
     exposeForProbe({ piano })
 
     const now = performance.now() / 1000
@@ -275,14 +313,32 @@ export default function Page() {
     autoRef.current = true
     setAuto(true)
     setScreen('play')
-    void openEyes()
-  }, [openEyes])
+    // The cat starts. Whether to hand it over is then a question with a
+    // reason attached, rather than a browser permission box arriving out of
+    // nowhere over a game somebody has just clicked on.
+    if (loadPrefs().camera) void openEyes()
+    else setSheet('camera')
+  }, [openEyes, volume])
 
   const quit = useCallback(() => {
     pianoRef.current?.allOff(0.3)
     pianoRef.current?.setPedal(0)
     setAuto(false)
     setScreen('menu')
+  }, [])
+
+  const togglePause = useCallback(() => {
+    const next = !pausedRef.current
+    pausedRef.current = next
+    setPaused(next)
+    const piano = pianoRef.current
+    if (!piano?.ready) return
+    if (next) void piano.pause()
+    else {
+      piano.resume()
+      // put the beat back under the playhead rather than starting over
+      conRef.current?.reanchor(performance.now() / 1000)
+    }
   }, [])
 
   const restart = useCallback(() => {
@@ -292,6 +348,8 @@ export default function Page() {
     sawFirstRef.current = false
     clappedRef.current = false
     overAtRef.current = 0
+    pausedRef.current = false
+    setPaused(false)
     countRef.current = con ? { left: con.piece.pulsesPerBar, at: performance.now() / 1000 + 0.5 } : null
     takeRef.current = 1
     setTake(1)
@@ -377,7 +435,7 @@ export default function Page() {
             ? 'SOMEONE SENT YOU A TAKE - ENTER TO WATCH'
             : previewRef.current
               ? 'LISTENING   P STOP   ENTER TO PLAY IT'
-              : warnRef.current?.text ?? null,
+              : null,
         })
       } else if (scr === 'loading') {
         drawLoading(ren.px, { t, status: statusRef.current, done: doneRef.current })
@@ -391,6 +449,12 @@ export default function Page() {
       } else {
         const con = conRef.current!
         const f = frameRef.current
+
+        if (pausedRef.current) {
+          ren.draw(con, f, 0, 'calm', { auto: false, vibe: 'PAUSED', hint: 'PAUSED' })
+          raf = requestAnimationFrame(tick)
+          return
+        }
 
         // --- count-in: somebody has to give you the tempo before asking you
         // to keep it. Any stroke of your own cancels it.
@@ -476,12 +540,18 @@ export default function Page() {
           }
         }
 
-        const asleep = (sawFirstRef.current && con.idleFor > 2.4) || (!sawFirstRef.current && f.dyn < 0.06)
+        // Driven by the cat or by a recording, nobody is waving and the
+        // camera reads nothing — but the piece is in full flow, so the cat is
+        // not asleep and the meters are not silent.
+        const driven = autoRef.current || !!rp
+        const level = driven ? ex.dyn : f.dyn
+        const asleep = !driven
+          && ((sawFirstRef.current && con.idleFor > 2.4) || (!sawFirstRef.current && f.dyn < 0.06))
         const u = con.unsteadiness
         let mood: CatMood = 'calm'
         if (asleep) mood = 'sleep'
-        else if (ex.dyn > 0.78 || u > 0.65) mood = 'wild'
-        else if (u < 0.22 && ex.dyn > 0.12) mood = 'happy'
+        else if (level > 0.78 || u > 0.65) mood = 'wild'
+        else if (u < 0.22 && level > 0.12) mood = 'happy'
 
         let vibe = 'CHAOS'
         if (asleep) vibe = 'ZZZ'
@@ -493,9 +563,7 @@ export default function Page() {
         let hint = ''
         const cam = camRef.current
         if (!autoRef.current) {
-          const w = liveWarn(now)
-          if (w) hint = w
-          else if (cam?.mode === 'hands' && !f.tracked) hint = 'SHOW ME YOUR HANDS'
+          if (cam?.mode === 'hands' && !f.tracked) hint = 'SHOW ME YOUR HANDS'
           else if (!sawFirstRef.current) hint = 'PLAY A KEY IN THE AIR'
           else if (asleep) hint = 'the cat is waiting'
         }
@@ -504,6 +572,7 @@ export default function Page() {
           auto: autoRef.current,
           vibe: rp ? 'REPLAY' : duet ? 'DUET' : vibe,
           hint: con.finished ? '' : hint,
+          level,
           countIn: countRef.current?.left ?? null,
           over: con.finished,
           debug: debugRef.current
@@ -568,7 +637,8 @@ export default function Page() {
         // one key per hand, so the keyboard can play chords too
         e.preventDefault()
         takeStrike(performance.now() / 1000, 0.6 + Math.random() * 0.3, k === 'z' ? 'L' : 'R')
-      } else if (k === 'r') restart()
+      } else if (k === 'p') { e.preventDefault(); togglePause() }
+      else if (k === 'r') restart()
       else if (k === 'a') setAuto((v) => !v)
       else if (k === 'escape') quit()
       else if (k === 'd') debugRef.current = !debugRef.current
@@ -580,7 +650,7 @@ export default function Page() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [begin, quit, restart, encore, takeStrike, watch, share, listen, stopPreview])
+  }, [begin, quit, restart, encore, takeStrike, watch, share, listen, stopPreview, togglePause])
 
   // A backgrounded tab gets no video frames, so the follower would wake up to
   // a several-second gap and lurch. Put the instrument down instead.
@@ -630,6 +700,10 @@ export default function Page() {
   // --------------------------------------------------------------------- ui
   return (
     <main className={`${pixel.variable} room`}>
+      <a className="sr skip" href="#deck">Skip to the controls</a>
+      <h1 className="sr">Piano Cat — mime a masterpiece at your webcam</h1>
+      <p className="sr" role="status" aria-live="polite">{said}</p>
+
       <div className="console">
         <div className="brand">
           <span className={`led ${screen === 'play' ? 'on' : ''}`} />
@@ -641,36 +715,79 @@ export default function Page() {
           <canvas
             ref={canvasRef}
             className={`stage ${screen === 'menu' ? 'pick' : ''}`}
+            role="application"
+            tabIndex={0}
+            aria-label={
+              screen === 'menu' ? 'Piece list. Up and down to choose, P to hear one, Enter to play.'
+                : screen === 'play' ? 'The instrument. Move a hand towards the camera to play a beat.'
+                  : screen === 'verdict' ? 'Your verdict. Enter to play it again, Escape for the list.'
+                    : 'Loading.'
+            }
             onMouseMove={onMove}
             onClick={onClick}
           />
           <div className="scan" />
+
+          {sheet !== 'none' && (
+            <div className="sheet" role="dialog" aria-modal="false" aria-labelledby="sheet-title">
+              <h2 id="sheet-title">{SHEETS[sheet].title}</h2>
+              <p>{SHEETS[sheet].body}</p>
+              <div className="sheet-row">
+                {SHEETS[sheet].ok && (
+                  <button type="button" className="btn on" onClick={() => { setSheet('none'); void openEyes() }}>
+                    {SHEETS[sheet].ok}
+                  </button>
+                )}
+                <button type="button" className="btn" onClick={() => setSheet('none')}>
+                  {SHEETS[sheet].alt ?? 'CLOSE'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
-        <div className="deck">
+        <div className="deck" id="deck">
+          <button type="button" className="mini help" onClick={() => setSheet((v) => (v === 'help' ? 'none' : 'help'))}
+            aria-label="How to play">?</button>
+          <span className="knob vol">
+            <b>VOL</b>
+            <input type="range" min={0} max={1} step={0.02} value={volume} id="vol"
+              aria-label="Volume"
+              onChange={(e) => setVolume(parseFloat(e.target.value))} />
+          </span>
           {screen === 'verdict' ? (
             <>
-              <button className="btn" onClick={quit}>&#9664; PIECES</button>
-              <button className="btn on" onClick={encore}>ENCORE &#9654;</button>
-              <button className="btn" onClick={() => lastTakeRef.current && watch(lastTakeRef.current)}>WATCH</button>
-              <button className="btn" onClick={share}>{copied ? 'LINK COPIED' : 'SHARE'}</button>
+              <button type="button" className="btn" onClick={quit} aria-label="Back to the piece list">&#9664; PIECES</button>
+              <button type="button" className="btn on" onClick={encore} aria-label="Play it again">ENCORE &#9654;</button>
+              <button type="button" className="btn" aria-label="Watch your performance back"
+                onClick={() => lastTakeRef.current && watch(lastTakeRef.current)}>WATCH</button>
+              <button type="button" className="btn" onClick={share}
+                aria-label="Copy a link to this performance">{copied ? 'LINK COPIED' : 'SHARE'}</button>
               <span className="tag">A TAKE IS A FEW HUNDRED NUMBERS &mdash; NO VIDEO LEAVES THIS PAGE</span>
             </>
           ) : screen === 'play' ? (
             <>
-              <button className="btn" onClick={quit}>&#9664; PIECES</button>
-              <button className="btn" onClick={restart}>RESTART</button>
-              <button className={`btn ${auto ? 'on' : ''}`} aria-pressed={auto} onClick={() => setAuto((v) => !v)}>AUTO</button>
+              <button type="button" className="btn" onClick={quit} aria-label="Back to the piece list">&#9664; PIECES</button>
+              <button type="button" className={`btn ${paused ? 'on' : ''}`} onClick={togglePause}
+                aria-pressed={paused} aria-label={paused ? 'Carry on playing' : 'Pause'}>
+                {paused ? 'RESUME' : 'PAUSE'}
+              </button>
+              <button type="button" className="btn" onClick={restart} aria-label="Start this piece again">RESTART</button>
+              <button type="button" className={`btn ${auto ? 'on' : ''}`} aria-pressed={auto}
+                onClick={() => setAuto((v) => !v)} aria-label="Let the cat play it">AUTO</button>
               <span className="knob">
-                <b>WAVE</b>
-                <button className="mini" onClick={() => setStride((v) => Math.max(1, v - 1))}>&minus;</button>
+                <b>MUSIC</b>
+                <button type="button" className="mini" aria-label="Less music per movement"
+                  onClick={() => setStride((v) => Math.max(1, v - 1))}>&minus;</button>
                 <i>{stride}</i>
-                <button className="mini" onClick={() => setStride((v) => Math.min(4, v + 1))}>+</button>
-                <b>BEAT{stride > 1 ? 'S' : ''}</b>
+                <button type="button" className="mini" aria-label="More music per movement"
+                  onClick={() => setStride((v) => Math.min(4, v + 1))}>+</button>
+                <b>PER WAVE</b>
               </span>
               <span className="knob">
                 <b>SENS</b>
-                <input type="range" min={0.4} max={2.5} step={0.05} value={sens}
+                <input type="range" min={0.4} max={2.5} step={0.05} value={sens} id="sens"
+                  aria-label="How big a movement has to be to play a note"
                   onChange={(e) => setSens(parseFloat(e.target.value))} />
                 <i>{sens.toFixed(2)}</i>
               </span>
@@ -679,7 +796,9 @@ export default function Page() {
           ) : (
             <>
               {screen === 'menu' && (
-                <button className={`btn ${listening ? 'on' : ''}`} onClick={() => void listen()}>
+                <button type="button" className={`btn ${listening ? 'on' : ''}`}
+                  aria-pressed={listening} onClick={() => void listen()}
+                  aria-label={listening ? 'Stop the preview' : 'Hear the selected piece'}>
                   {listening ? 'STOP' : 'LISTEN'}
                 </button>
               )}
@@ -695,10 +814,10 @@ export default function Page() {
 
       <p className="note">
         {screen === 'play' && piece
-          ? `${piece.composer} — ${piece.title}. Drop a hand to play a beat — each hand plays its own staff, and both together make a chord. Rest a hand and that staff falls back; take it out of frame and it stops. Lift both hands and the dampers come off, so everything rings. Extra taps between the beats come out as ornaments: nothing you do is ever silent. It ends on its last chord — play it all the way through. SPACE / Z / X = keystroke, A = auto, R = restart, D = meters, ESC = back.`
-          : shared
-            ? 'Somebody sent you a performance. Press ENTER to watch it play back — a take is a few hundred numbers describing what their hands did, and nothing else.'
-            : 'Your hands are the hammers and the pedal. Every stroke plays the next beat, so the music follows your pace — speed up, drag your heels, stop dead. Play a piece to its final chord and the cat will tell you what it thought. The scores are complete, and come from published digital editions credited in lib/scores/SOURCES.md.'}
+          ? `${piece.composer} — ${piece.title}`
+          : 'Your hands are the hammers and the pedal.'}
+        {' '}
+        <button type="button" className="linky" onClick={() => setSheet('help')}>How to play</button>
       </p>
     </main>
   )
@@ -722,6 +841,59 @@ function exposeForProbe(bits: { piano?: Piano; probe?: Probe; cam?: Camera; con?
 const PREVIEW_EX: Expression = {
   dyn: 0.5, wild: 0.05, height: 0.35, spread: 0.5, travel: 0,
   present: { L: false, R: false }, x: { L: 0.3, R: 0.7 }, twoHanded: false,
+}
+
+
+/**
+ * Everything the app has to say that is longer than a badge. It lives in the
+ * DOM rather than on the canvas so it can be read aloud, selected, and
+ * answered with a real button — canvas text is a picture of words.
+ */
+const SHEETS: Record<string, { title: string; body: string; ok?: string; alt?: string }> = {
+  camera: {
+    title: 'THE CAT IS PLAYING',
+    body: 'Let it see your hands and you can take over — move a hand towards the camera to play. '
+      + 'The picture never leaves this page and nothing is recorded or uploaded.',
+    ok: 'USE MY CAMERA',
+    alt: 'JUST WATCH',
+  },
+  denied: {
+    title: 'NO CAMERA, THEN',
+    body: 'Your browser said no, which is fair enough. You can still play the whole thing from the '
+      + 'keyboard: SPACE for a note, Z and X for a hand each. Or allow the camera in the address bar '
+      + 'and ask again.',
+    ok: 'ASK AGAIN',
+    alt: 'PLAY ON THE KEYBOARD',
+  },
+  nocam: {
+    title: 'NO CAMERA FOUND',
+    body: 'Nothing here to see with. Everything still works from the keyboard: SPACE for a note, '
+      + 'Z and X for a hand each.',
+    alt: 'PLAY ON THE KEYBOARD',
+  },
+  slow: {
+    title: 'WATCHING THE ROOM INSTEAD',
+    body: 'Hand tracking is more than this machine can keep up with, so the cat is watching the '
+      + 'whole picture move rather than your fingers. It works — it is just less exact about which '
+      + 'hand did what.',
+    alt: 'CARRY ON',
+  },
+  lost: {
+    title: 'LOST THE CAMERA',
+    body: 'It stopped sending pictures — unplugged, or another program took it. The keyboard still '
+      + 'works: SPACE for a note, Z and X for a hand each.',
+    ok: 'TRY AGAIN',
+    alt: 'CARRY ON',
+  },
+  help: {
+    title: 'HOW TO PLAY',
+    body: 'Move a hand down or towards the camera to play. Each hand plays its own half of the '
+      + 'music, and both together make a chord. Lift both hands and the dampers come off, so '
+      + 'everything rings. Rest a hand and its half falls back.\n\n'
+      + 'SPACE, Z and X play from the keyboard. A hands it to the cat. P pauses. R starts over. '
+      + 'D shows the meters. ESC goes back.',
+    alt: 'GOT IT',
+  },
 }
 
 const BLANK = new Uint8Array(GW * GH)

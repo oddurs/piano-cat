@@ -1,4 +1,4 @@
-import type { Px } from './px'
+import { calm, type Px } from './px'
 import type { Piece } from './pieces'
 import type { Report } from './conductor'
 import { drawCatBody, drawCandelabra, type CatState } from './cat'
@@ -52,6 +52,7 @@ function drawBackdrop(px: Px, t: number, accent: string) {
     px.a(0.05 + 0.10 * (1 - y / MH)).r(0, y, MW, 1, '#3a2a6a')
   }
   px.reset
+  if (calm()) return
   for (const n of NOTES) {
     const p = (t * n.sp / 100 + n.ph) % 1
     const y = MH - p * MH
@@ -116,7 +117,7 @@ export function drawMenu(px: Px, o: {
   drawBackdrop(px, o.t, p.accent)
 
   // --- title
-  const bounce = Math.round(Math.sin(o.t * 2) * 2)
+  const bounce = calm() ? 0 : Math.round(Math.sin(o.t * 2) * 2)
   px.textCS('PIANO CAT', MW / 2, 4 + bounce, '#ffd76a', '#7a3d00', 16, 2)
   px.a(0.85).textC('mime a masterpiece at your webcam', MW / 2, 26, '#a49dc4')
   px.reset

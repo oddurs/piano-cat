@@ -68,6 +68,12 @@ const screen = async () => {
   return `UNKNOWN(${d.slice(0, 30)})`
 }
 
+// Start from nothing: the app remembers your last piece and whether the
+// camera was allowed, and a tool that inherits yesterday's state is a tool
+// that tests something different every time it runs.
+await call('Page.navigate', { url: APP })
+await wait(1500)
+await ev("localStorage.removeItem('piano-cat.prefs')")
 await call('Page.navigate', { url: APP })
 await wait(2500)
 if (await screen() !== 'MENU') {
@@ -77,6 +83,19 @@ if (await screen() !== 'MENU') {
 
 for (let i = 0; i < PIECE; i++) await key('ArrowDown', 'ArrowDown', 40)
 await key('Enter', 'Enter', 13)
+
+// A first-time visitor is asked whether the cat may use the camera before
+// anything demands it. There is no camera worth having in here, so take the
+// other option and play from the keyboard.
+for (let i = 0; i < 40; i++) {
+  const on = await ev("!!document.querySelector('.sheet')")
+  if (on) {
+    console.log('sheet:', await ev("document.querySelector('.sheet h2')?.textContent"))
+    await ev("[...document.querySelectorAll('.sheet .btn')].pop().click()")
+    break
+  }
+  await wait(250)
+}
 
 let started = false
 for (let i = 0; i < 90; i++) {
