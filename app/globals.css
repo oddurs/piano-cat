@@ -107,3 +107,18 @@ input[type=range]::-moz-range-thumb { width: 10px; height: 14px; border-radius: 
 }
 
 @media (max-height: 640px) { .note { display: none; } }
+
+/* A phone. The console chrome is generous because a desktop has the room for
+   it; a 390px screen does not, and the canvas is the entire point. */
+@media (max-width: 760px) {
+  .room { padding: 6px; gap: 6px; }
+  .console { padding: 8px; }
+  .brand { font-size: 8px; letter-spacing: 1px; }
+  .brand .model { display: none; }
+  .deck { flex-wrap: wrap; justify-content: center; gap: 6px; padding: 8px 0 2px; }
+  .knob input[type=range] { width: 70px; }
+  .note { font-size: 7px; line-height: 1.9; max-width: 100%; }
+}
+@media (max-width: 760px) and (max-height: 720px) {
+  .note { display: none; }
+}

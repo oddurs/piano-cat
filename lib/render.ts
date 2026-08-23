@@ -55,6 +55,9 @@ export class Renderer {
   private nextBlink = 2
   private ghost: Record<Side, number> = { L: 0, R: 0 }
   private reveals: { text: string; life: number }[] = []
+  private buckets: number[][] = Array.from({ length: 8 }, () => [])
+  private pal: string[] = []
+  private palKey = ''
   t = 0
 
   constructor(canvas: HTMLCanvasElement) {
@@ -185,24 +188,48 @@ export class Renderer {
     px.textCS('FINE', W / 2, 31, '#ffffff', con.piece.accent2)
   }
 
+  /**
+   * The camera backdrop, in nine fill calls instead of four and a half
+   * thousand. Every pixel of the grid lands in one of four luma steps or one
+   * of four motion steps, so the colours are bucketed and each bucket is
+   * filled in one pass — the per-pixel globalAlpha and fillStyle writes were
+   * the single most expensive thing in the frame, and they were competing for
+   * budget with the hand model.
+   */
   private drawCamera(f: PlayFrame, dark: string, accent: string) {
     if (f.pixels.length < GW * GH) return
     const cx = this.cx
     const px = f.pixels, mk = f.motionMask
-    for (let y = 0; y < GH; y++) {
-      for (let x = 0; x < GW; x++) {
-        const i = y * GW + x
-        cx.globalAlpha = 0.10 + (px[i] >> 6) * 0.10       // 4 luma steps
-        cx.fillStyle = dark
-        cx.fillRect(x * 5, y * 5, 5, 5)
-        if (mk[i] > 60) {
-          cx.globalAlpha = (mk[i] / 255) * 0.55
-          cx.fillStyle = accent
-          cx.fillRect(x * 5, y * 5, 5, 5)
-        }
-      }
+    const pal = this.palette(dark, accent)
+    for (const b of this.buckets) b.length = 0
+
+    for (let i = 0; i < GW * GH; i++) {
+      const lit = mk[i] > 60
+      const k = lit ? 4 + Math.min(3, (mk[i] - 60) >> 6) : px[i] >> 6
+      this.buckets[k].push(i)
     }
-    cx.globalAlpha = 1
+    for (let k = 0; k < 8; k++) {
+      const b = this.buckets[k]
+      if (!b.length) continue
+      cx.fillStyle = pal[k]
+      for (const i of b) cx.fillRect((i % GW) * 5, ((i / GW) | 0) * 5, 5, 5)
+    }
+  }
+
+  /** The eight colours the backdrop can be, computed once per palette. */
+  private palette(dark: string, accent: string) {
+    const key = dark + accent
+    if (this.palKey === key) return this.pal
+    const over = (hex: string, a: number) => {
+      const v = parseInt(hex.slice(1), 16)
+      return `rgb(${Math.round(((v >> 16) & 255) * a)},${Math.round(((v >> 8) & 255) * a)},${Math.round((v & 255) * a)})`
+    }
+    this.pal = [
+      over(dark, 0.10), over(dark, 0.20), over(dark, 0.30), over(dark, 0.40),
+      over(accent, 0.16), over(accent, 0.29), over(accent, 0.42), over(accent, 0.55),
+    ]
+    this.palKey = key
+    return this.pal
   }
 
   private get look() { return 4 }
