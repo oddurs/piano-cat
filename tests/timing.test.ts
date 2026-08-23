@@ -71,6 +71,10 @@ function run(piece: Piece, strikes: Hit[], opts: { strideAt?: [number, number][]
   return { con, piano, maxTogether, maxJump, maxDrift, backwards, bpm: con.bpm }
 }
 
+/** Seconds per stroke of a hand — not per pulse. The two are the same only
+ *  when a piece advances one beat per wave, which is no longer all of them. */
+const strokePeriod = (piece: Piece) => (60 / piece.pulseBpm) * piece.stride
+
 const steady = (n: number, p: number, t0 = 0): Hit[] =>
   Array.from({ length: n }, (_, i) => ({ t: t0 + i * p, side: (i % 2 ? 'R' : 'L') as Side }))
 
@@ -80,7 +84,7 @@ const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648
 // ------------------------------------------------------------ every piece
 
 for (const piece of PIECES) {
-  const p0 = 60 / piece.pulseBpm
+  const p0 = strokePeriod(piece)
   const chord = maxChord(piece)
 
   test(`${piece.id}: notes never land in a clump`, () => {
@@ -95,7 +99,7 @@ for (const piece of PIECES) {
     const r = run(piece, steady(24, p0))
     // between strikes only the damped chase moves the playhead, and it is
     // rate-capped. A strike itself is allowed to jump — that is the point.
-    const cap = ((6 * piece.stride) / ((60 / piece.pulseBpm) * piece.stride)) * DT * 1.05
+    const cap = ((6 * piece.stride) / strokePeriod(piece)) * DT * 1.05
     assert.ok(r.maxDrift <= cap, `drifted ${r.maxDrift.toFixed(4)}, cap is ${cap.toFixed(4)} pulses/frame`)
     assert.ok(
       r.maxJump <= piece.stride + cap,
@@ -221,8 +225,8 @@ test('a big early strike is a flourish at any beats-per-wave, never a clump', ()
 
 test('a performance ends at the last bar instead of wrapping', () => {
   for (const piece of PIECES) {
-    const p = 60 / piece.pulseBpm
-    const r = run(piece, steady(piece.loopAt + 4, p), { loop: false })
+    const strokes = Math.ceil(piece.loopAt / piece.stride) + 4
+    const r = run(piece, steady(strokes, strokePeriod(piece)), { loop: false })
     assert.ok(r.con.finished, `${piece.id} never finished`)
     assert.ok(
       r.con.pos <= piece.loopAt + 1e-9,
@@ -234,8 +238,8 @@ test('a performance ends at the last bar instead of wrapping', () => {
 
 test('the piece plays its final chord before it stops', () => {
   for (const piece of PIECES) {
-    const p = 60 / piece.pulseBpm
-    const r = run(piece, steady(piece.loopAt + 4, p), { loop: false })
+    const strokes = Math.ceil(piece.loopAt / piece.stride) + 4
+    const r = run(piece, steady(strokes, strokePeriod(piece)), { loop: false })
     const last = Math.max(...piece.notes.map((n) => n.b))
     for (const n of piece.notes.filter((n) => n.b === last)) {
       assert.ok(

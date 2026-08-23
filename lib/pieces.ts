@@ -198,6 +198,116 @@ function minuet(): NoteEv[] {
   return o
 }
 
+
+// ------------------------------------------------------------- Chopsticks
+
+/**
+ * The Celebrated Chop Waltz, Euphemia Allen, 1877. Written to be played with
+ * the sides of both hands, which makes it the one piece here that is *about*
+ * having two of them — and the only one anybody has ever played as a duet on
+ * purpose.
+ */
+function chopsticks(): NoteEv[] {
+  const o: NoteEv[] = []
+  const chop = (a: string, b: string, bar: number, v = 0.72) => {
+    for (let k = 0; k < 3; k++) {
+      o.push({ p: m(a), b: bar * 3 + k, d: 0.9, v: k === 0 ? v + 0.08 : v, h: 1 })
+      o.push({ p: m(b), b: bar * 3 + k, d: 0.9, v: k === 0 ? v + 0.08 : v, h: 1 })
+    }
+  }
+  const oom = (root: string, fifth: string, bar: number) => {
+    o.push({ p: m(root), b: bar * 3, d: 1, v: 0.55, h: -1 })
+    o.push({ p: m(fifth), b: bar * 3 + 1, d: 1, v: 0.4, h: -1 })
+    o.push({ p: m(fifth), b: bar * 3 + 2, d: 1, v: 0.4, h: -1 })
+  }
+
+  const pairs: [string, string][] = [
+    ['F4', 'G4'], ['F4', 'G4'], ['E4', 'G4'], ['E4', 'G4'],
+    ['D4', 'B4'], ['D4', 'B4'], ['C4', 'E4'], ['C4', 'E4'],
+  ]
+  const bass: [string, string][] = [
+    ['C2', 'G2'], ['C2', 'G2'], ['C2', 'G2'], ['C2', 'G2'],
+    ['G2', 'D3'], ['G2', 'D3'], ['C2', 'G2'], ['C2', 'G2'],
+  ]
+  pairs.forEach(([a, b], i) => { chop(a, b, i); oom(bass[i][0], bass[i][1], i) })
+
+  // the little turn everybody plays at the end of the phrase
+  o.push({ p: m('C4'), b: 24, d: 1, v: 0.8, h: 1 })
+  o.push({ p: m('E4'), b: 24, d: 1, v: 0.8, h: 1 })
+  o.push({ p: m('G4'), b: 24, d: 1, v: 0.8, h: 1 })
+  o.push({ p: m('C5'), b: 24, d: 1, v: 0.85, h: 1 })
+  o.push({ p: m('C2'), b: 24, d: 1, v: 0.7, h: -1 })
+  o.push({ p: m('C3'), b: 24, d: 1, v: 0.6, h: -1 })
+  return o
+}
+
+// ---------------------------------------------------------- The Entertainer
+
+/** Scott Joplin, 1902. The main strain, where the right hand lands between
+ *  the beats and the left hand refuses to. */
+function entertainer(): NoteEv[] {
+  const o: NoteEv[] = []
+  const r = (n: string, b: number, d = 1, v = 0.76) => o.push({ p: m(n), b, d, v, h: 1 })
+  const bass = (n: string, b: number) => o.push({ p: m(n), b, d: 1.6, v: 0.58, h: -1 })
+  const stride = (names: string, b: number) =>
+    names.split(/\s+/).forEach((n) => o.push({ p: m(n), b, d: 1.4, v: 0.42, h: -1 }))
+
+  // pickup run
+  r('D5', 0); r('E5', 1); r('C5', 2)
+  // main strain, in eighth-note pulses
+  r('A4', 4); r('B4', 5); r('G4', 6); r('D4', 7)
+  r('E4', 8); r('C4', 9)
+  r('C5', 12); r('D5', 13); r('D#5', 14); r('E5', 15)
+  r('C5', 16); r('E5', 17); r('C5', 18); r('E5', 19)
+  r('C5', 20, 2); r('A4', 22); r('B4', 23)
+  r('C5', 24); r('D5', 25); r('E5', 26); r('B4', 27)
+  r('D5', 28); r('C5', 29, 3)
+
+  // oom-pah, stubbornly on the beat while the tune is not
+  for (let bar = 0; bar < 4; bar++) {
+    const t = bar * 8
+    const root = bar === 2 ? 'G2' : 'C2'
+    const fifth = bar === 2 ? 'D3' : 'G2'
+    bass(root, t); stride(bar === 2 ? 'B3 D4 G4' : 'E3 G3 C4', t + 2)
+    bass(fifth, t + 4); stride(bar === 2 ? 'B3 D4 G4' : 'E3 G3 C4', t + 6)
+  }
+  return o
+}
+
+// ------------------------------------------------- In the Hall of the Mountain King
+
+/**
+ * Grieg, 1875. The one piece here that is a vehicle rather than a tune: it
+ * exists to be started as quietly and slowly as you can bear and finished as
+ * fast and as loud as you can manage, and both of those are yours to do.
+ */
+function mountainKing(): NoteEv[] {
+  const o: NoteEv[] = []
+  const theme = ['A3', 'B3', 'C4', 'D4', 'C4', 'A3', 'C4', 'B3']
+  const answer = ['G#3', 'B3', 'D4', 'B3', 'G#3', 'B3', 'D4', 'B3']
+  const high = ['A4', 'B4', 'C5', 'D5', 'C5', 'A4', 'C5', 'B4']
+
+  const say = (notes: string[], bar: number, v: number) =>
+    notes.forEach((n, k) => o.push({ p: m(n), b: bar * 8 + k, d: 0.85, v, h: 1 }))
+  const tread = (root: string, bar: number, v: number) => {
+    for (let k = 0; k < 4; k++) {
+      o.push({ p: m(root), b: bar * 8 + k * 2, d: 1.6, v, h: -1 })
+    }
+  }
+
+  say(theme, 0, 0.36); tread('A2', 0, 0.3)
+  say(answer, 1, 0.4); tread('E2', 1, 0.32)
+  say(theme, 2, 0.5); tread('A2', 2, 0.42)
+  say(answer, 3, 0.56); tread('E2', 3, 0.46)
+  say(high, 4, 0.68); tread('A2', 4, 0.56)
+  say(answer, 5, 0.74); tread('E2', 5, 0.6)
+  say(high, 6, 0.86); tread('A2', 6, 0.7)
+
+  // it does not end so much as arrive
+  for (const n of ['A2', 'A3', 'E4', 'A4']) o.push({ p: m(n), b: 56, d: 4, v: 0.95, h: n === 'A2' ? -1 : 1 })
+  return o
+}
+
 export const PIECES: Piece[] = [
   {
     id: 'bach-prelude',
@@ -242,6 +352,39 @@ export const PIECES: Piece[] = [
     accent: '#ffe27a', accent2: '#7a5a12',
     resonance: [43, 50, 55, 59, 62, 67, 74],
     notes: minuet(),
+  },
+  {
+    id: 'chopsticks',
+    title: 'Chopsticks',
+    composer: 'E. Allen',
+    short: 'Allen',
+    blurb: 'A waltz for the sides of both hands. Deeply silly. Weirdly hard.',
+    pulseBpm: 150, pulsesPerBar: 3, stride: 1, loopAt: 27, release: 0.18,
+    accent: '#8ef07a', accent2: '#2c6b24',
+    resonance: [48, 55, 60, 64, 67, 72, 76],
+    notes: chopsticks(),
+  },
+  {
+    id: 'entertainer',
+    title: 'The Entertainer',
+    composer: 'S. Joplin',
+    short: 'Joplin',
+    blurb: 'Ragtime. The tune lands between the beats; the bass never does.',
+    pulseBpm: 168, pulsesPerBar: 8, stride: 2, loopAt: 32, release: 0.2,
+    accent: '#ffa64d', accent2: '#8a4a12',
+    resonance: [48, 55, 60, 64, 67, 72, 79],
+    notes: entertainer(),
+  },
+  {
+    id: 'mountain-king',
+    title: 'Mountain King',
+    composer: 'E. Grieg',
+    short: 'Grieg',
+    blurb: 'Start it as slowly and quietly as you dare. Do not stay there.',
+    pulseBpm: 132, pulsesPerBar: 8, stride: 2, loopAt: 64, release: 0.22,
+    accent: '#c69bff', accent2: '#4a2a80',
+    resonance: [45, 52, 57, 61, 64, 69, 76],
+    notes: mountainKing(),
   },
 ]
 
