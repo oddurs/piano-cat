@@ -54,6 +54,7 @@ export class Renderer {
   private blink = 0
   private nextBlink = 2
   private ghost: Record<Side, number> = { L: 0, R: 0 }
+  private reveals: { text: string; life: number }[] = []
   t = 0
 
   constructor(canvas: HTMLCanvasElement) {
@@ -63,6 +64,34 @@ export class Renderer {
     this.cx.imageSmoothingEnabled = false
     this.cx.textBaseline = 'top'
     this.px = new Px(this.cx)
+  }
+
+  /**
+   * Say a thing once, where it is happening, at the moment it becomes true.
+   * The pedal, the ornaments, the two staves and the chord were all real
+   * before this and all invisible, because they were explained in a paragraph
+   * of body copy under the console that nobody has ever read.
+   */
+  reveal(text: string) {
+    if (this.reveals.some((r) => r.text === text)) return
+    this.reveals.push({ text, life: 2.6 })
+    if (this.reveals.length > 3) this.reveals.shift()
+  }
+
+  private drawReveals(dt: number, accent: string) {
+    const px = this.px
+    for (let i = this.reveals.length - 1; i >= 0; i--) {
+      const r = this.reveals[i]
+      r.life -= dt
+      if (r.life <= 0) { this.reveals.splice(i, 1); continue }
+      const fade = Math.min(1, r.life / 0.5) * Math.min(1, (2.6 - r.life) / 0.2)
+      const w = px.textW(r.text) + 12
+      const y = 88 - i * 14
+      px.a(fade * 0.92)
+      px.panel(W / 2 - w / 2, y, w, 12, '#151123', px.mix(accent, '#ffffff', .4), '#08060f')
+      px.text(r.text, W / 2 - w / 2 + 6, y + 3, accent)
+      px.reset
+    }
   }
 
   noteFired(midi: number, vel: number, accent: string, ornament = false) {
@@ -123,6 +152,7 @@ export class Renderer {
     drawCatPaws(px, cat, KEY_TOP, con.lastHand, con.strikeFlash)
     this.drawSlip(con)
     this.drawParticles(dt)
+    this.drawReveals(dt, con.piece.accent)
     this.drawHud(con, frame, opts)
     if (opts.countIn != null) this.drawCountIn(opts.countIn, con)
     if (opts.over) this.drawFine(con)
@@ -282,10 +312,17 @@ export class Renderer {
     const half = 4 + con.toNextBeat * 46
     const y = KEY_TOP - 4
     const hot = con.strikeFlash > 0.55
+    // On a strike the bracket reports how close you were: white and closed up
+    // when you were on it, wide and dim when you were not.
+    const good = con.accuracy > 0.72
     px.a(hot ? 0.95 : 0.35 + (1 - con.toNextBeat) * 0.4)
-    const c = hot ? '#ffffff' : con.piece.accent
+    const c = hot ? (good ? '#ffffff' : con.piece.accent2) : con.piece.accent
     px.r(cxp - half - 4, y, 4, 2, c)
     px.r(cxp + half, y, 4, 2, c)
+    if (hot && good) {
+      px.a(con.strikeFlash * 0.9)
+      px.r(cxp - 7, y - 3, 14, 1, '#ffffff')
+    }
     px.reset
   }
 

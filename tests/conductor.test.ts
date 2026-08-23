@@ -245,3 +245,16 @@ test('a reaction holds its place and then ages out', () => {
   for (let k = 0; k < 30; k++) con.update(1 / 60, k / 60, ex())
   assert.ok(con.reaction!.age > age0, 'reactions age on their own clock')
 })
+
+test('it reports how close to the beat you actually landed', () => {
+  const { con } = rig()
+  con.strike(0, 0.7, 'R')
+  con.update(1 / 60, 0, ex())
+  const per = con.period
+
+  con.strike(per, 0.7, 'L')             // exactly on the predicted beat
+  assert.ok(con.accuracy > 0.95, `on the beat should score high, got ${con.accuracy.toFixed(2)}`)
+
+  con.strike(per * 2 + per * 0.35, 0.7, 'R')   // a third of a beat late
+  assert.ok(con.accuracy < 0.3, `well off the beat should score low, got ${con.accuracy.toFixed(2)}`)
+})

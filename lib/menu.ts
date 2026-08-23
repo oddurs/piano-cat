@@ -158,41 +158,6 @@ export function drawLoading(px: Px, o: { t: number; status: string; done: number
   px.a(0.75 + Math.sin(o.t * 5) * 0.25).textC(o.status, MW / 2, 166, '#cfc7ee')
   px.reset
 }
-
-/**
- * Calibration. Every room is lit differently and every person sits at a
- * different distance, so instead of shipping one set of thresholds and a
- * sensitivity slider to apologise for them, we watch you reach up and down
- * once and take the measurement.
- */
-export function drawCalibrate(px: Px, o: {
-  t: number; left: number; hands: { x: number; y: number }[]; accent: string
-}) {
-  drawBackdrop(px, o.t, o.accent)
-  px.textCS('TUNING THE ROOM', MW / 2, 16, '#ffd76a', '#7a3d00', 8, 1)
-
-  const bx = 40, by = 40, bw = MW - 80, bh = 92
-  px.panel(bx, by, bw, bh, '#12101d', '#3a3352', '#08070e')
-  px.a(0.6).dither(bx + 1, by + 1, bw - 2, bh - 2, '#1d1a2e', 3)
-  px.reset
-
-  for (const h of o.hands) {
-    const x = bx + h.x * bw
-    const y = by + h.y * bh
-    px.a(0.35).r(x - 1, by, 2, bh, o.accent)
-    px.reset
-    px.blobOut(x - 5, y - 4, 10, 8, o.accent, '#ffffff', 2)
-  }
-  if (!o.hands.length) px.a(0.8).textC('SHOW ME YOUR HANDS', MW / 2, by + bh / 2 - 4, '#8a86a0')
-  px.reset
-
-  px.textC('REACH UP HIGH, THEN DOWN LOW', MW / 2, by + bh + 10, '#cfc7ee')
-  const n = 20, w = (MW - 60) / n
-  for (let i = 0; i < n; i++) {
-    px.r(30 + i * w, by + bh + 24, w - 1, 6, (1 - o.left) * n > i ? o.accent : '#2b2440')
-  }
-}
-
 /**
  * The verdict. A performance that just stops has not ended, it has been
  * abandoned — this is the part that makes finishing mean something, and the

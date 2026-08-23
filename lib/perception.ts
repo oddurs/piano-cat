@@ -28,6 +28,11 @@ export type Sample = {
 const BLANK = new Uint8Array(1)
 /** a hand unseen for longer than this has left the instrument */
 const GONE_AFTER = 0.5
+/** the range a hand is assumed to move through before we know any better */
+const DEFAULT_TOP = 0.28
+const DEFAULT_BOTTOM = 0.7
+/** below this the pedal would be a hair trigger */
+const MIN_SPAN = 0.2
 
 export class Perception {
   sensitivity = 1
@@ -44,27 +49,27 @@ export class Perception {
   private lastT = -1
   private fallbackSide: Side = 'R'
 
-  // Calibration: where your hands actually live in this room, in this chair.
-  private top = 0.22
-  private bottom = 0.74
-  private calibrating = false
+  // Where your hands live, in this room, in this chair. Learned continuously
+  // rather than in a calibration screen: a gate that has to be passed before
+  // you may hear anything is a bad trade for a measurement that can just as
+  // well be taken while you play, and this one also follows you if you shift
+  // in your seat halfway through.
+  private top = DEFAULT_TOP
+  private bottom = DEFAULT_BOTTOM
 
-  beginCalibration() {
-    this.calibrating = true
-    this.top = 1
-    this.bottom = 0
-  }
+  private learn(dt: number, y: number) {
+    // reach somewhere new and the range takes it almost at once; stop going
+    // there and it forgets over about half a minute
+    if (y < this.top) this.top += (y - this.top) * 0.4
+    else this.top += (DEFAULT_TOP - this.top) * lerpRate(dt, 30)
+    if (y > this.bottom) this.bottom += (y - this.bottom) * 0.4
+    else this.bottom += (DEFAULT_BOTTOM - this.bottom) * lerpRate(dt, 30)
 
-  endCalibration() {
-    this.calibrating = false
-    // A span this small means you barely moved; keep something usable.
-    if (this.bottom - this.top < 0.16) {
-      const mid = clamp((this.top + this.bottom) / 2, 0.3, 0.7)
-      this.top = mid - 0.2
-      this.bottom = mid + 0.2
-    } else {
-      this.top -= 0.03
-      this.bottom += 0.03
+    const span = this.bottom - this.top
+    if (span < MIN_SPAN) {                     // barely moved; keep it playable
+      const mid = (this.top + this.bottom) / 2
+      this.top = mid - MIN_SPAN / 2
+      this.bottom = mid + MIN_SPAN / 2
     }
   }
 
@@ -101,10 +106,7 @@ export class Perception {
       if (o) {
         this.tracked = true
         this.lastSeen[side] = s.t
-        if (this.calibrating) {
-          this.top = Math.min(this.top, o.y)
-          this.bottom = Math.max(this.bottom, o.y)
-        }
+        this.learn(dt, o.y)
         const p = this.prev[side]
         const gap = p ? Math.max(1e-3, s.t - p.t) : 0
         const sp = p ? Math.hypot(o.x - p.x, o.y - p.y) / gap : 0
@@ -190,5 +192,7 @@ export class Perception {
     this.expr.reset()
     this.tracked = false
     this.lastT = -1
+    this.top = DEFAULT_TOP
+    this.bottom = DEFAULT_BOTTOM
   }
 }

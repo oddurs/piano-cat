@@ -118,6 +118,8 @@ export class Conductor {
   lastHand: -1 | 1 = -1
   phase = 0                // 0..1 through the current stroke
   pedal = 0
+  /** 0..1, how close your last beat landed to where it was predicted */
+  accuracy = 0
 
   constructor(piece: Piece, piano: Piano) {
     this.piece = piece
@@ -196,6 +198,10 @@ export class Conductor {
 
     this.lastSide = side
     this.strikeFlash = 1
+    // Where you landed against where the pulse said you would. Not used to
+    // judge you — used so you can see it, which is the only way anyone gets
+    // better at anything.
+    this.accuracy = clamp(1 - Math.abs(gap / this.period - 1) * 2.5, 0, 1)
 
     if (gap < 3.5) {
       const ratio = gap / this.period
@@ -473,6 +479,7 @@ export class Conductor {
     this.ornamentFlash = 0
     this.phase = 0
     this.pedal = 0
+    this.accuracy = 0
     this.finished = false
     this.reaction = null
     this.lastBar = -1
