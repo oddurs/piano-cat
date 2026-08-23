@@ -396,3 +396,51 @@ test('onset timing does not depend on when a frame happened to run', () => {
     assert.ok(Math.abs(ga - gb) < 0.005, `gap ${i} differed by ${((ga - gb) * 1000).toFixed(1)}ms`)
   }
 })
+
+test('one fumbled stroke does not drag the whole performance with it', () => {
+  // Somebody playing steadily who puts a single stroke half a beat late has
+  // not changed their mind about the tempo. They have fumbled one stroke.
+  const run = (badAt: number | null) => {
+    const piano = fakePiano()
+    const con = new Conductor(bach, piano as unknown as never)
+    con.loop = true
+    let t = 0
+    const times: number[] = []
+    for (let k = 0; k < 40; k++) {
+      times.push(t)
+      t += k === 19 && badAt ? p0 * badAt : p0
+    }
+    let now = 0, i = 0
+    let before = 0, after = 0
+    while (now < times[times.length - 1] + 2) {
+      now += DT
+      while (i < times.length && times[i] <= now) {
+        piano.clock.now = now
+        con.strike(times[i], 0.6, i % 2 ? 'R' : 'L')
+        i++
+        if (i === 20) before = con.bpm
+        if (i === 22) after = con.bpm
+      }
+      piano.clock.now = now
+      con.update(DT, now, EX)
+    }
+    return Math.abs(after / before - 1)
+  }
+  assert.ok(run(null) < 0.01, 'a clean run should not move at all')
+  assert.ok(run(1.5) < 0.02, `one late stroke moved the tempo by ${(run(1.5) * 100).toFixed(1)}%`)
+  assert.ok(run(0.45) < 0.02, `one early stroke moved the tempo by ${(run(0.45) * 100).toFixed(1)}%`)
+})
+
+test('but a sustained change of pace is still followed', () => {
+  // The distinction that matters: one stroke out of line is a fumble, every
+  // stroke moving the same way is you meaning it.
+  let t = 0, per = p0
+  const hits: Hit[] = [{ t, side: 'L' }]
+  for (let i = 0; i < 24; i++) { per *= 0.96; t += per; hits.push({ t, side: i % 2 ? 'L' : 'R' }) }
+  assert.ok(run(bach, hits, { loop: true }).bpm > bach.pulseBpm * 1.6, 'accelerando')
+
+  t = 0; per = p0
+  const slow: Hit[] = [{ t, side: 'L' }]
+  for (let i = 0; i < 24; i++) { per *= 1.05; t += per; slow.push({ t, side: i % 2 ? 'L' : 'R' }) }
+  assert.ok(run(bach, slow, { loop: true }).bpm < bach.pulseBpm * 0.6, 'ritardando')
+})

@@ -46,6 +46,15 @@ export const dynMark = (d: number) => DYN_MARKS.find(([t]) => d < t)?.[1] ?? 'ff
 const CHORD_WINDOW = 0.095
 /** A staff whose hand has gone quiet fades to this rather than vanishing. */
 const GHOST = 0.2
+/**
+ * How wrong a stroke can be, in octaves of beat, before it stops counting as
+ * evidence about the tempo. A gentle accelerando moves by a few per cent a
+ * stroke and stays believed; a stroke a third of a beat out barely registers.
+ */
+const TEMPO_SIGMA = 0.22
+/** and below this much confidence, the cat has seen you fumble it */
+const STUMBLE_BELOW = 0.15
+
 /** The follower's own tick. Fine enough that a note never lands on the wrong
  *  side of it, coarse enough to be free. */
 const STEP = 1 / 240
@@ -164,6 +173,14 @@ export class Conductor {
   get progress() { return this.playhead / this.piece.loopAt }
   get idleFor() { return this.lastStrikeAt < 0 ? 0 : performance.now() / 1000 - this.lastStrikeAt }
 
+  /** What your strokes have lately been like, robust to any one of them. */
+  private recentGap() {
+    const xs = this.intervals.slice(-5)
+    if (xs.length < 3) return this.period
+    const sorted = [...xs].sort((a, b) => a - b)
+    return sorted[sorted.length >> 1]
+  }
+
   /** 0 = metronomic, 1 = shambolic */
   get unsteadiness() {
     if (this.intervals.length < 3) return 0
@@ -232,14 +249,22 @@ export class Conductor {
     this.accuracy = clamp(1 - Math.abs(gap / this.period - 1) * 2.5, 0, 1)
 
     if (gap < 3.5) {
-      const ratio = gap / this.period
-      // Believe a new tempo more while you're settling in, much less when it
-      // looks like a stumble rather than a real change of pace.
-      let trust = this.strikeCount < 5 ? 0.45 : 0.26
-      if (ratio < 0.65 || ratio > 1.6) {
-        trust *= 0.35
-        this.react('stumble')      // that was not where the beat was
-      }
+      // How much this stroke has to say about tempo, judged against the last
+      // few strokes rather than against the running estimate. The old rule
+      // was a cliff — anything between two-thirds and one-and-a-half times
+      // the expected beat was believed in full — so one stroke half a beat
+      // late dragged the whole performance nearly nine per cent slower.
+      //
+      // Judging against the estimate instead is worse, and the tests caught
+      // it: an accelerando makes the estimate lag, the lag reads as a large
+      // error, the error destroys the confidence, and the follower stops
+      // following exactly when you are asking it to move. A median of what
+      // you have been doing lately is unmoved by one stumble and moves with
+      // you through a ramp, which is the distinction that actually matters.
+      const off = Math.abs(Math.log2(gap / this.recentGap()))
+      const confidence = Math.exp(-(off * off) / (2 * TEMPO_SIGMA * TEMPO_SIGMA))
+      const trust = (this.strikeCount < 5 ? 0.45 : 0.26) * confidence
+      if (confidence < STUMBLE_BELOW) this.react('stumble')
       this.period = clamp(this.period * (1 - trust) + gap * trust, 0.28, 2.6)
       this.intervals.push(gap)
       if (this.intervals.length > 16) this.intervals.shift()
