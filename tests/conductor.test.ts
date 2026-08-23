@@ -264,3 +264,69 @@ test('it reports how close to the beat you actually landed', () => {
   con.strike(per * 2 + per * 0.35, 0.7, 'R')   // a third of a beat late
   assert.ok(con.accuracy < 0.3, `well off the beat should score low, got ${con.accuracy.toFixed(2)}`)
 })
+
+test('the top of a chord is played louder, and a moment first', () => {
+  // A chord where every note is the same weight is a chord symbol, not a
+  // chord. The tune is on top; it leads and it sings.
+  const { piano, con } = rig(piece('alla-turca'))
+  let t = 0
+  for (let i = 0; i < 14; i++) {
+    piano.clock.now = t
+    con.strike(t, 0.7, i % 2 ? 'L' : 'R')
+    const p = con.period
+    for (let k = 0; k < 20; k++) {
+      t += p / 20
+      piano.clock.now = t
+      con.update(p / 20, t, ex())
+    }
+  }
+  // Cluster by what a listener would hear as one event rather than by an
+  // exact timestamp — the whole point is that the top note is a few
+  // milliseconds early, so grouping on equality would put it in a chord of
+  // its own and find nothing.
+  const heard = [...piano.played].sort((a, b) => a.when - b.when)
+  const chords: (typeof piano.played)[] = []
+  for (const n of heard) {
+    const last = chords[chords.length - 1]
+    if (last && n.when - last[0].when < 0.03) last.push(n)
+    else chords.push([n])
+  }
+  const played = chords.filter((g) => g.length >= 3)
+  assert.ok(played.length > 3, `expected some chords, found ${played.length}`)
+
+  let louder = 0
+  let first = 0
+  for (const g of played) {
+    const top = g.reduce((a, b) => (b.midi > a.midi ? b : a))
+    const others = g.filter((n) => n !== top)
+    if (top.vel > Math.max(...others.map((n) => n.vel))) louder++
+    if (top.when <= Math.min(...others.map((n) => n.when)) + 1e-9) first++
+  }
+  assert.ok(louder / played.length > 0.8, `only ${louder}/${played.length} chords sang on top`)
+  assert.ok(first / played.length > 0.8, `only ${first}/${played.length} chords led with the tune`)
+})
+
+test('a performance comes out with a real spread of weight', () => {
+  // Every note the same loudness is the thing that made this sound typed
+  // rather than played, and the imported scores that carry no dynamics of
+  // their own were the worst of it.
+  for (const id of ['bach-prelude', 'minuet-g', 'alla-turca']) {
+    const { piano, con } = rig(piece(id))
+    let t = 0
+    for (let i = 0; i < 16; i++) {
+      piano.clock.now = t
+      con.strike(t, 0.7, i % 2 ? 'L' : 'R')
+      const p = con.period
+      for (let k = 0; k < 20; k++) {
+        t += p / 20
+        piano.clock.now = t
+        con.update(p / 20, t, ex())
+      }
+    }
+    const vels = piano.played.map((n) => n.vel)
+    assert.ok(vels.length > 20, `${id}: only ${vels.length} notes`)
+    const lo = Math.min(...vels)
+    const hi = Math.max(...vels)
+    assert.ok(hi / lo > 1.5, `${id}: loudest note is only ${(hi / lo).toFixed(2)}x the quietest`)
+  }
+})
