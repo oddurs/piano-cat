@@ -46,6 +46,12 @@ export const dynMark = (d: number) => DYN_MARKS.find(([t]) => d < t)?.[1] ?? 'ff
 const CHORD_WINDOW = 0.095
 /** A staff whose hand has gone quiet fades to this rather than vanishing. */
 const GHOST = 0.2
+/** The follower's own tick. Fine enough that a note never lands on the wrong
+ *  side of it, coarse enough to be free. */
+const STEP = 1 / 240
+/** After a stall — a hidden tab, a long GC — catch up this much and no more. */
+const MAX_CATCH_UP = 0.25
+
 /** Notes that arrive in a clump get spread by this much, per distinct beat... */
 const FLOURISH = 0.018
 /** ...but the whole flourish still has to read as one gesture. */
@@ -109,6 +115,7 @@ export class Conductor {
    *  when the camera does, and a frozen face is worse than no face. */
   reaction: { kind: Reaction; age: number } | null = null
   private lastBar = -1
+  private acc = 0
   private tally = { strokes: 0, notes: 0, dynLo: 1, dynHi: 0, steadySum: 0, steadyN: 0 }
 
   intervals: number[] = []
@@ -162,6 +169,7 @@ export class Conductor {
     if (this.finished) return 'over'
     this.tally.strokes += 1
     if (strength > 0.88) this.react('startled')
+    // Per-stroke, not per-frame, so this one is genuinely a plain blend.
     this.hit[side] += (strength - this.hit[side]) * 0.55
     this.engage[side] = 1
     this.lastHand = side === 'L' ? -1 : 1
@@ -309,7 +317,30 @@ export class Conductor {
 
   // ------------------------------------------------------------------ update
 
+  /**
+   * The instrument must not play differently on a 144Hz laptop than on a
+   * 60Hz one. Everything that integrates over time is stepped at a fixed rate
+   * and the leftover is carried, so the follower sees the same slice of time
+   * whatever the display is doing. Things that merely *set* an audio
+   * parameter happen once per frame, because doing them four times would be
+   * four times the work for the same result.
+   */
   update(dt: number, now: number, ex: Expression) {
+    this.pedal = ex.height
+    this.piano.setPedal(ex.height)
+    const meanX = ex.present.L && ex.present.R
+      ? (ex.x.L + ex.x.R) / 2
+      : ex.present.L ? ex.x.L : ex.present.R ? ex.x.R : 0.5
+    this.piano.stir(ex.travel, meanX, ex.dyn)
+
+    this.acc = Math.min(this.acc + dt, MAX_CATCH_UP)
+    while (this.acc >= STEP) {
+      this.acc -= STEP
+      this.step(STEP, now - this.acc, ex)
+    }
+  }
+
+  private step(dt: number, now: number, ex: Expression) {
     if (this.reaction) this.reaction.age += dt
     this.strikeFlash = Math.max(0, this.strikeFlash - dt * 4.5)
     this.ornamentFlash = Math.max(0, this.ornamentFlash - dt * 6)
@@ -324,15 +355,6 @@ export class Conductor {
       const floor = !ex.twoHanded || !this.everBoth ? 1 : ex.present[s] ? GHOST : 0
       this.engage[s] += (floor - this.engage[s]) * lerpRate(dt, 1.3)
     }
-
-    // Hands high, dampers up. This is continuous and it is always live, which
-    // is what makes the instrument answer between the notes.
-    this.pedal = ex.height
-    this.piano.setPedal(ex.height)
-    const meanX = ex.present.L && ex.present.R
-      ? (ex.x.L + ex.x.R) / 2
-      : ex.present.L ? ex.x.L : ex.present.R ? ex.x.R : 0.5
-    this.piano.stir(ex.travel, meanX, ex.dyn)
 
     if (!this.started) return
 
@@ -484,6 +506,7 @@ export class Conductor {
     this.reaction = null
     this.lastBar = -1
     this.tally = { strokes: 0, notes: 0, dynLo: 1, dynHi: 0, steadySum: 0, steadyN: 0 }
+    this.acc = 0
   }
 
   /** How it went. Only meaningful once `finished`. */

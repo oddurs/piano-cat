@@ -58,11 +58,14 @@ export class Perception {
   private bottom = DEFAULT_BOTTOM
 
   private learn(dt: number, y: number) {
-    // reach somewhere new and the range takes it almost at once; stop going
-    // there and it forgets over about half a minute
-    if (y < this.top) this.top += (y - this.top) * 0.4
+    // Reach somewhere new and the range takes it almost at once; stop going
+    // there and it forgets over about half a minute. Both rates are stated in
+    // time rather than in frames — a fast 0.4-per-frame blend converges twice
+    // as quickly at 120Hz as at 60, which made the pedal feel different on
+    // different machines for no reason anybody could have guessed at.
+    if (y < this.top) this.top += (y - this.top) * lerpRate(dt, 0.03)
     else this.top += (DEFAULT_TOP - this.top) * lerpRate(dt, 30)
-    if (y > this.bottom) this.bottom += (y - this.bottom) * 0.4
+    if (y > this.bottom) this.bottom += (y - this.bottom) * lerpRate(dt, 0.03)
     else this.bottom += (DEFAULT_BOTTOM - this.bottom) * lerpRate(dt, 30)
 
     const span = this.bottom - this.top
