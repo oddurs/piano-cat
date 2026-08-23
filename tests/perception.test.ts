@@ -76,12 +76,12 @@ test('the pedal range is learned while you play, with no calibration step', () =
   const sweep = Array.from({ length: 60 }, (_, i) => {
     const t = i / 30
     const y = 0.15 + (i / 59) * 0.65
-    return { t, capturedAt: t, energy: 0, hands: [hand(0.5, y)] }
+    return { t, capturedAt: t, energy: 0, watching: 'hands' as const, hands: [hand(0.5, y)] }
   })
   for (const s of sweep) p.ingest(s)
 
-  const high = p.ingest({ t: 3, capturedAt: 3, energy: 0, hands: [hand(0.5, 0.15, 0)] })
-  const low = p.ingest({ t: 3.1, capturedAt: 3.1, energy: 0, hands: [hand(0.5, 0.8, 0)] })
+  const high = p.ingest({ t: 3, capturedAt: 3, energy: 0, watching: 'hands' as const, hands: [hand(0.5, 0.15, 0)] })
+  const low = p.ingest({ t: 3.1, capturedAt: 3.1, energy: 0, watching: 'hands' as const, hands: [hand(0.5, 0.8, 0)] })
   assert.ok(high.height > 0.9, `hands up should read as pedal down: ${high.height}`)
   assert.ok(low.height < 0.1, `hands down should damp: ${low.height}`)
 })
@@ -92,7 +92,7 @@ test('a room that is never learned still has a usable pedal', () => {
   // reach both ends of the pedal rather than being stuck at half.
   const p = new Perception()
   const at = (t: number, y: number) =>
-    p.ingest({ t, capturedAt: t, energy: 0, hands: [hand(0.5, y)] })
+    p.ingest({ t, capturedAt: t, energy: 0, watching: 'hands' as const, hands: [hand(0.5, y)] })
   for (let i = 0; i < 30; i++) at(i / 30, 0.5)
   assert.ok(at(1.1, 0.3).height > 0.75, 'lifting still opens the dampers')
   assert.ok(at(1.2, 0.72).height < 0.25, 'lowering still closes them')
@@ -105,7 +105,7 @@ test('the pedal range is learned at the same speed on any display', () => {
     for (let i = 0; i * dt < 2; i++) {
       const t = i * dt
       // hold the hands high for two seconds
-      p.ingest({ t, capturedAt: t, energy: 0, hands: [hand(0.5, 0.18, 0)] })
+      p.ingest({ t, capturedAt: t, energy: 0, watching: 'hands' as const, hands: [hand(0.5, 0.18, 0)] })
     }
     // then read where the middle of the range now sits
     return p.ingest({
@@ -131,7 +131,7 @@ test('reaching forward plays a note, not only pressing down', () => {
     const ph = ((t % 0.5) / 0.5)
     const z = ph < 0.35 ? -(ph / 0.35) * 0.22 : -(1 - (ph - 0.35) / 0.65) * 0.22
     const f = p.ingest({
-      t, capturedAt: t, energy: 0.02,
+      t, capturedAt: t, energy: 0.02, watching: 'hands' as const,
       hands: [hand(0.62, 0.5, z)],
     })
     for (const s of f.strokes) strokes.push(s.side)
@@ -147,7 +147,7 @@ test('a hand that neither drops nor presses stays silent', () => {
     // drifting sideways only — no press in any direction
     const x = 0.4 + Math.sin(t * 2) * 0.15
     n += p.ingest({
-      t, capturedAt: t, energy: 0.02,
+      t, capturedAt: t, energy: 0.02, watching: 'hands' as const,
       hands: [hand(x, 0.5)],
     }).strokes.length
   }
@@ -165,7 +165,7 @@ test('one finger tapping is a note, even with the hand held still', () => {
     const tap = ph < 0.35 ? 0.5 + (ph / 0.35) * 0.16 : 0.5 + (1 - (ph - 0.35) / 0.65) * 0.16
     // the hand sits still; the index finger works
     n += p.ingest({
-      t, capturedAt: t, energy: 0.02,
+      t, capturedAt: t, energy: 0.02, watching: 'hands' as const,
       hands: [{ x: 0.66, y: 0.5, sy: 0.5, z: 0, fingers: [0.5, tap, 0.5, 0.5, 0.5], spread: 0.5, conf: 1 }],
     }).strokes.length
   }
@@ -183,7 +183,7 @@ test('a delicate gesture is still heard', () => {
       const t = i / 30
       const y = strikingY(t, 0.55, depth, 0.45)
       n += p.ingest({
-        t, capturedAt: t, energy: 0.02,
+        t, capturedAt: t, energy: 0.02, watching: 'hands' as const,
         hands: [{ x: 0.66, y, sy: y, z: 0, fingers: [y, y, y, y, y], spread: 0.5, conf: 1 }],
       }).strokes.length
     }
@@ -203,7 +203,7 @@ test('a flatter hand plays a harder note', () => {
       const y = strikingY(t, 0.5, 0.07, 0.47)
       const fingers = Array.from({ length: 5 }, (_, k) => (k < moving ? y : 0.5))
       for (const s of p.ingest({
-        t, capturedAt: t, energy: 0.02,
+        t, capturedAt: t, energy: 0.02, watching: 'hands' as const,
         hands: [{ x: 0.66, y: 0.5, sy: 0.5, z: 0, fingers, spread: 0.5, conf: 1 }],
       }).strokes) out.push(s.strength)
     }
@@ -222,7 +222,7 @@ test('onsets are not rounded to the camera frame', () => {
     const t = i / 30
     const y = strikingY(t, 0.47)
     for (const s of p.ingest({
-      t, capturedAt: t, energy: 0.02,
+      t, capturedAt: t, energy: 0.02, watching: 'hands' as const,
       hands: [{ x: 0.66, y, sy: y, z: 0, fingers: [y, y, y, y, y], spread: 0.5, conf: 1 }],
     }).strokes) ts.push(s.t)
   }

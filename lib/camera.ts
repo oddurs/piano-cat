@@ -18,6 +18,7 @@
 // are what should decide it, not the fact that workers sound faster.
 
 import { BASE } from './base'
+import { readHand, type LM } from './hand'
 import type { Observation, Sample } from './perception'
 
 export const GW = 64
@@ -29,10 +30,6 @@ export type CameraMode = 'hands' | 'pixels'
 const WRIST = 0
 const PALM = [0, 5, 9, 13, 17]
 const TIPS = [8, 12, 16]
-/** thumb, index, middle, ring, little */
-const FINGERS = [4, 8, 12, 16, 20]
-/** how much a press towards the camera counts alongside a press downwards */
-const PRESS_DEPTH = 0.55
 const THUMB_TIP = 4
 const PINKY_TIP = 20
 const MIDDLE_MCP = 9
@@ -97,9 +94,12 @@ export class Camera {
         },
         runningMode: 'VIDEO',
         numHands: 2,
-        minHandDetectionConfidence: 0.45,
-        minHandPresenceConfidence: 0.45,
-        minTrackingConfidence: 0.45,
+        // Deliberately not permissive. At 0.45 the model will call a face, a
+        // sleeve or a passing shoulder a hand, and everything downstream then
+        // faithfully plays it.
+        minHandDetectionConfidence: 0.7,
+        minHandPresenceConfidence: 0.7,
+        minTrackingConfidence: 0.6,
       })
       onProgress?.(1)
       this.mode = 'hands'
@@ -156,7 +156,9 @@ export class Camera {
       const t0 = performance.now()
       try {
         const res = this.landmarker.detectForVideo(this.video, stamp)
-        hands = (res?.landmarks ?? []).map(readHand).filter(Boolean) as Observation[]
+        hands = (res?.landmarks ?? [])
+          .map((lm: LM[], i: number) => readHand(lm, res?.handedness?.[i]?.[0]?.score ?? 1))
+          .filter(Boolean) as Observation[]
       } catch {
         // a transient GPU hiccup should not take the instrument down
       }
@@ -178,7 +180,7 @@ export class Camera {
       this.fpsAt = t
     }
 
-    this.onSample?.({ t, capturedAt, hands, energy })
+    this.onSample?.({ t, capturedAt, hands, energy, watching: this.mode })
   }
 
   /** Downsample to the little luma grid, and diff it for the backdrop glow. */
@@ -205,37 +207,5 @@ export class Camera {
     this.prev.set(this.pixels)
     this.hasPrev = true
     return acc / (GW * GH * CAP)
-  }
-}
-
-type LM = { x: number; y: number; z: number }
-
-function readHand(lm: LM[]): Observation | null {
-  if (!lm || lm.length < 21) return null
-  let px = 0, py = 0
-  for (const i of PALM) { px += lm[i].x; py += lm[i].y }
-  px /= PALM.length; py /= PALM.length
-
-  let sy = 0
-  let pz = 0
-  for (const i of TIPS) sy += lm[i].y
-  sy /= TIPS.length
-  for (const i of PALM) pz += lm[i].z ?? 0
-  pz /= PALM.length
-
-  const palm = Math.hypot(lm[MIDDLE_MCP].x - lm[WRIST].x, lm[MIDDLE_MCP].y - lm[WRIST].y) || 1e-3
-  const span = Math.hypot(lm[THUMB_TIP].x - lm[PINKY_TIP].x, lm[THUMB_TIP].y - lm[PINKY_TIP].y) / palm
-
-  return {
-    x: 1 - px,                                     // mirrored to match the backdrop
-    y: py,
-    sy,
-    z: pz,
-    // Each finger's own press. Averaging them first hid the thing worth
-    // seeing: one finger falling while the rest of the hand stays put is a
-    // note, and it barely moves an average at all.
-    fingers: FINGERS.map((i) => lm[i].y - (lm[i].z ?? 0) * PRESS_DEPTH),
-    spread: Math.max(0, Math.min(1, (span - 0.7) / 1.1)),
-    conf: 1,
   }
 }
