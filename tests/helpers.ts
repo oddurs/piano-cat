@@ -32,17 +32,24 @@ export function clip(seconds: number, players: Player[], fps = 30): Sample[] {
   return out
 }
 
-/** A Piano that records instead of making noise. */
+/**
+ * A Piano that records instead of making noise. `clock` stands in for the
+ * audio clock: set it to the frame's time before calling update() and `when`
+ * is the absolute moment each note was scheduled to sound, which is the only
+ * thing that decides whether a run is even.
+ */
 export function fakePiano() {
-  const played: { midi: number; vel: number; at: number }[] = []
+  const clock = { now: 0 }
+  const played: { midi: number; vel: number; at: number; when: number }[] = []
   const thuds: number[] = []
   return {
     played,
     thuds,
+    clock,
     ready: true,
     pedal: 0,
     play: (s: { midi: number; vel: number; at?: number }) =>
-      played.push({ midi: s.midi, vel: s.vel, at: s.at ?? 0 }),
+      played.push({ midi: s.midi, vel: s.vel, at: s.at ?? 0, when: clock.now + (s.at ?? 0) }),
     thud: (v: number) => thuds.push(v),
     stir: () => {},
     setPedal: () => {},

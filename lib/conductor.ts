@@ -52,6 +52,18 @@ const STEP = 1 / 240
 /** After a stall — a hidden tab, a long GC — catch up this much and no more. */
 const MAX_CATCH_UP = 0.25
 
+/**
+ * How far past the playhead notes are handed to the instrument. A note used
+ * to be scheduled when a frame happened to notice it was due, which put its
+ * onset anywhere inside that frame — up to sixteen milliseconds of slop, and
+ * more under load, on every note the follower produces between your strokes.
+ * Now each note is scheduled by the time actually remaining until it is due,
+ * so the frame it was noticed in stops mattering. This has to cover a frame
+ * with room to spare; beyond that a stroke arriving mid-window would be
+ * revising notes already committed to the audio clock.
+ */
+const SCHED_AHEAD = 0.045
+
 /** Notes that arrive in a clump get spread by this much, per distinct beat... */
 const FLOURISH = 0.018
 /** ...but the whole flourish still has to read as one gesture. */
@@ -116,6 +128,14 @@ export class Conductor {
   reaction: { kind: Reaction; age: number } | null = null
   private lastBar = -1
   private acc = 0
+  /** how far ahead to hand notes over: a fixed floor, or a frame, whichever
+   *  is longer. A lookahead shorter than the gap between frames schedules
+   *  nothing early and is no lookahead at all. */
+  private ahead = SCHED_AHEAD
+  /** how far behind the frame's clock the current sub-step is */
+  private lag = 0
+  /** the last shape asked for, so a strike can sound without waiting for a frame */
+  private lastEx: Expression | null = null
   private tally = { strokes: 0, notes: 0, dynLo: 1, dynHi: 0, steadySum: 0, steadyN: 0 }
 
   intervals: number[] = []
@@ -228,9 +248,15 @@ export class Conductor {
     this.beatOrigin += this.stride
     this.strikeCount += 1
 
-    // The beat moves *now*. update() runs in the same frame and the notes on
-    // this beat sound with the gesture that asked for them.
+    // The beat moves now, and so does the sound. Waiting for the next frame
+    // to notice put up to a display's worth of delay on the one note in the
+    // piece you personally asked for, and made it the only uneven thing in an
+    // otherwise exactly-scheduled run.
     this.advance(this.beatOrigin)
+    if (this.lastEx) {
+      this.lag = 0
+      this.emit(now, this.lastEx, this.beatOrigin)
+    }
     return 'beat'
   }
 
@@ -333,11 +359,20 @@ export class Conductor {
       : ex.present.L ? ex.x.L : ex.present.R ? ex.x.R : 0.5
     this.piano.stir(ex.travel, meanX, ex.dyn)
 
+    this.lastEx = ex
+    this.ahead = Math.max(SCHED_AHEAD, dt * 1.6)
     this.acc = Math.min(this.acc + dt, MAX_CATCH_UP)
     while (this.acc >= STEP) {
       this.acc -= STEP
+      // A sub-step stands at `now - acc`, but the instrument's clock is read
+      // when play() is called, which is the end of the frame. Without handing
+      // the difference down, every note in a frame is scheduled as though its
+      // sub-step were happening at the frame boundary — which is precisely
+      // the frame-quantised slop this whole exercise is about removing.
+      this.lag = this.acc
       this.step(STEP, now - this.acc, ex)
     }
+    this.lag = 0
   }
 
   private step(dt: number, now: number, ex: Expression) {
@@ -375,11 +410,15 @@ export class Conductor {
     this.phase = Math.min(1, frac)
     const target = this.beatOrigin + frac * this.stride
 
-    // Damped chase for everything *between* strikes. Tighter than it was:
-    // the follower is now only smoothing prediction error, not absorbing the
-    // strike itself, so it no longer needs to hide a lag.
+    // Damped chase for everything *between* strikes. A first-order tracker
+    // following a ramp settles at a lag of rate/gain, and at the old gain
+    // that lag was about a sixteenth of a beat — wider than the window we
+    // look ahead through, so every note came out of it already overdue and
+    // the lookahead bought nothing at all. A strike jumps the playhead
+    // directly these days and a clump gets spread as a flourish, so the chase
+    // is only ever smoothing motion that was already smooth. It can be tight.
     const maxRate = (6 * this.stride) / this.period
-    const pull = (target - this.pos) * Math.min(1, dt * 22)
+    const pull = (target - this.pos) * Math.min(1, dt * 90)
     this.advance(this.pos + Math.min(pull, maxRate * dt))
 
     // Everything the playhead just passed, spread over a window sized to how
@@ -394,8 +433,34 @@ export class Conductor {
       this.tally.steadyN += 1
     }
 
+    this.emit(now, ex, target)
+  }
+
+  /**
+   * Hand the instrument everything the music has reached, and everything it
+   * is about to. Called from the follower's own tick, and again the instant
+   * you strike — a note you asked for should not wait for the next frame to
+   * be drawn before anybody hears it.
+   */
+  private emit(now: number, ex: Expression, target: number) {
     const head = this.playhead
+    const secPerPulse = this.period / this.stride
+    const ahead = head + this.ahead / secPerPulse
+    // When a note is due comes straight off the beat grid — the last stroke
+    // and the tempo it implied — and not off any integrator. The playhead is
+    // a damped chase, so it lags; the prediction it chases is deliberately
+    // squashed near a beat so the music eases into your next stroke rather
+    // than slamming into it. Both are right for deciding *what has been
+    // reached*. Both are wrong for deciding *when a thing should sound*, and
+    // timing notes against them made a written run uneven by up to a tenth of
+    // a note in a way no amount of looking at the code would have shown.
+    const offset = this.pos - head              // take-relative -> absolute
+    const dueAt = (b: number) =>
+      this.lastStrikeAt + ((b + offset - this.beatOrigin) / this.stride) * this.period
+    void target
+
     const due: NoteEv[] = []
+    const soon: NoteEv[] = []
     if (this.finished) {
       // the last chord is written past wherever the playhead stopped; play it
       while (this.idx < this.notes.length) due.push(this.notes[this.idx++])
@@ -410,8 +475,17 @@ export class Conductor {
     while (this.idx < this.notes.length && this.notes[this.idx].b <= head + 1e-6) {
       due.push(this.notes[this.idx++])
     }
-    if (!due.length) return
+    // Everything the playhead is about to reach, handed over now with the
+    // time remaining until it is actually wanted. The seam is left alone —
+    // the wrap above owns it.
+    while (this.idx < this.notes.length && this.notes[this.idx].b <= ahead) {
+      soon.push(this.notes[this.idx++])
+    }
+    if (!due.length && !soon.length) return
 
+    // Overdue notes have no time of their own left, so they are the ones that
+    // get spread: a clump the playhead jumped past comes out as a flourish
+    // rather than a chord nobody wrote.
     let slots = 0
     let atB = -1
     const slotOf = due.map((n) => {
@@ -419,8 +493,13 @@ export class Conductor {
       atB = n.b
       return slots
     })
-    const step = slots > 0 ? Math.min(FLOURISH_MAX, slots * FLOURISH) / slots : 0
-    for (let i = 0; i < due.length; i++) this.fire(due[i], now, ex, slotOf[i] * step)
+    const spread = slots > 0 ? Math.min(FLOURISH_MAX, slots * FLOURISH) / slots : 0
+    for (let i = 0; i < due.length; i++) {
+      this.fire(due[i], now, ex, Math.max(0, slotOf[i] * spread - this.lag))
+    }
+    for (const n of soon) {
+      this.fire(n, now, ex, Math.max(0, dueAt(n.b) - now - this.lag))
+    }
   }
 
   private fire(n: NoteEv, now: number, ex: Expression, delay: number) {
@@ -507,6 +586,7 @@ export class Conductor {
     this.lastBar = -1
     this.tally = { strokes: 0, notes: 0, dynLo: 1, dynHi: 0, steadySum: 0, steadyN: 0 }
     this.acc = 0
+    this.lag = 0
   }
 
   /** How it went. Only meaningful once `finished`. */

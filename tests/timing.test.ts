@@ -331,3 +331,68 @@ test('a stall does not make the follower bolt to catch up', () => {
   con.update(9, p0 + 9, EX)          // nine seconds in a hidden tab
   assert.ok(con.pos - before < 2, `the playhead jumped ${(con.pos - before).toFixed(2)} pulses on resume`)
 })
+
+// ------------------------------------------------------- onset precision
+
+/** The moments the instrument was actually asked to make a sound. */
+function onsets(piece: Piece, fps: number) {
+  const piano = fakePiano()
+  const con = new Conductor(piece, piano as unknown as never)
+  const dt = 1 / fps
+  const per = strokePeriod(piece)
+  const hits = steady(Math.ceil(piece.loopAt / piece.stride) + 2, per)
+  let t = 0
+  let i = 0
+  while (!con.finished && t < hits[hits.length - 1].t + 4) {
+    t += dt
+    while (i < hits.length && hits[i].t <= t) {
+      // a stroke reads the instrument's clock at the moment it happens, not
+      // at the next frame — that is the whole point of it sounding at once
+      piano.clock.now = hits[i].t
+      con.strike(hits[i].t, 0.6, hits[i].side)
+      i++
+    }
+    piano.clock.now = t
+    con.update(dt, t, EX)
+  }
+  return [...new Set(piano.played.map((p) => +p.when.toFixed(5)))].sort((a, b) => a - b)
+}
+
+test('a written run comes out evenly, whatever the frame rate', () => {
+  // Bach's right hand is a continuous stream of sixteenths. Played at the
+  // tempo it asks for, the gaps between them should all be the same — and
+  // that has to be true of a machine dropping to twenty frames a second too,
+  // because the alternative is an instrument that stutters when something
+  // else on the laptop gets busy.
+  const expected = (60 / bach.pulseBpm) * 0.25
+  for (const fps of [20, 30, 60, 144]) {
+    const xs = onsets(bach, fps)
+    const gaps: number[] = []
+    // from the second stroke on: the first has no grid to be even against,
+    // because the grid is what the strokes are for
+    for (let i = 5; i < xs.length; i++) {
+      const g = xs[i] - xs[i - 1]
+      if (g > expected * 0.4 && g < expected * 1.6) gaps.push(g)
+    }
+    assert.ok(gaps.length > 60, `${fps}fps: only ${gaps.length} usable gaps`)
+    const worst = Math.max(...gaps.map((g) => Math.abs(g - expected)))
+    assert.ok(
+      worst < 0.004,
+      `${fps}fps: a sixteenth landed ${(worst * 1000).toFixed(1)}ms off an even grid`,
+    )
+  }
+})
+
+test('onset timing does not depend on when a frame happened to run', () => {
+  // The same music, sampled by two very different displays. If scheduling
+  // still leaned on frame boundaries these would drift apart.
+  const a = onsets(PIECES[6], 30)
+  const b = onsets(PIECES[6], 144)
+  const n = Math.min(a.length, b.length)
+  assert.ok(n > 40, `only ${n} onsets to compare`)
+  for (let i = 5; i < n; i++) {
+    const ga = a[i] - a[i - 1]
+    const gb = b[i] - b[i - 1]
+    assert.ok(Math.abs(ga - gb) < 0.005, `gap ${i} differed by ${((ga - gb) * 1000).toFixed(1)}ms`)
+  }
+})

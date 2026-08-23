@@ -43,7 +43,7 @@ export type Chrome = {
   countIn?: number | null
   /** the last chord is ringing and the performance is over */
   over?: boolean
-  debug?: { fps: number; p50: number; p95: number; mode: string } | null
+  debug?: { fps: number; p50: number; p95: number; mode: string; out: number } | null
 }
 
 export class Renderer {
@@ -489,6 +489,9 @@ export class Renderer {
     const lines = [
       `${d.mode[0]} ${d.fps.toFixed(0)}FPS`,
       `${d.p50.toFixed(0)}/${d.p95.toFixed(0)}MS`,
+      // what the browser adds after we hand the note over. Not ours to fix,
+      // but reporting shutter-to-schedule as shutter-to-sound was flattering.
+      `OUT ${d.out.toFixed(0)}MS`,
       `DYN ${f.dyn.toFixed(1)}`,
       `L${con.engage.L.toFixed(1)}R${con.engage.R.toFixed(1)}`,
     ]

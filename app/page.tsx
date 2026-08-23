@@ -508,6 +508,7 @@ export default function Page() {
               p50: probeRef.current.p50,
               p95: probeRef.current.p95,
               mode: cam?.stream ? cam.mode.toUpperCase() : 'NO CAM',
+              out: (pianoRef.current?.latency ?? 0) * 1000,
             }
             : null,
         })

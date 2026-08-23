@@ -123,6 +123,19 @@ export class Piano {
   }
 
   resume() { if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume() }
+
+  /**
+   * What the browser adds between us scheduling a sample and a speaker moving.
+   * We cannot remove it, but the number belongs on the meters next to the one
+   * we can do something about — reporting shutter-to-schedule as though it
+   * were shutter-to-sound was flattering and wrong.
+   */
+  get latency() {
+    if (!this.ctx) return 0
+    const base = this.ctx.baseLatency ?? 0
+    const out = (this.ctx as unknown as { outputLatency?: number }).outputLatency ?? 0
+    return base + out
+  }
   async silenceForHiddenTab() { this.allOff(0.15); this.bed?.mute(); await this.ctx?.suspend?.().catch?.(() => {}) }
 
   /** Which notes the strings should ring in sympathy with. */
