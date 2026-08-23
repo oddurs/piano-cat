@@ -29,6 +29,10 @@ export type CameraMode = 'hands' | 'pixels'
 const WRIST = 0
 const PALM = [0, 5, 9, 13, 17]
 const TIPS = [8, 12, 16]
+/** thumb, index, middle, ring, little */
+const FINGERS = [4, 8, 12, 16, 20]
+/** how much a press towards the camera counts alongside a press downwards */
+const PRESS_DEPTH = 0.55
 const THUMB_TIP = 4
 const PINKY_TIP = 20
 const MIDDLE_MCP = 9
@@ -227,6 +231,10 @@ function readHand(lm: LM[]): Observation | null {
     y: py,
     sy,
     z: pz,
+    // Each finger's own press. Averaging them first hid the thing worth
+    // seeing: one finger falling while the rest of the hand stays put is a
+    // note, and it barely moves an average at all.
+    fingers: FINGERS.map((i) => lm[i].y - (lm[i].z ?? 0) * PRESS_DEPTH),
     spread: Math.max(0, Math.min(1, (span - 0.7) / 1.1)),
     conf: 1,
   }

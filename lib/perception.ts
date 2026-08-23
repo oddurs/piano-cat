@@ -15,6 +15,8 @@ export type Observation = {
   y: number       // 0..1 palm centre, 0 = top
   sy: number      // 0..1 the point a keystroke actually moves (fingertips)
   z: number       // depth, negative towards the camera, in hand-widths
+  /** each fingertip's own press, thumb first — a hand is five levers */
+  fingers: number[]
   spread: number  // 0..1 thumb-to-pinky span, normalised by palm size
   conf: number
 }
@@ -134,9 +136,9 @@ export class Perception {
         this.prev[side] = { x: o.x, y: o.y, t: s.t }
 
         this.strokers[side].sensitivity = this.sensitivity
-        // down and forward are the same gesture as far as the instrument cares
-        const press = o.sy - o.z * PRESS_DEPTH
-        const hit = this.strokers[side].feed(s.t, press, true, s.capturedAt)
+        // down and forward are the same gesture as far as the instrument
+        // cares, and a hand is five levers rather than one average
+        const hit = this.strokers[side].feed(s.t, o.fingers, true, s.capturedAt)
         if (hit) strokes.push({ ...hit, x: o.x })
       } else {
         const gone = s.t - this.lastSeen[side] > GONE_AFTER
