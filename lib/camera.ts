@@ -6,6 +6,16 @@
 // where it hadn't changed — which meant every observation was up to a whole
 // render frame stale on top of the camera's own latency. Now we look exactly
 // when there is something new to look at.
+//
+// This all runs on the main thread, and it stays there deliberately. Moving
+// the model into a worker was planned, then measured and dropped: with the
+// hand model running and a piece playing, frame intervals came out at 8ms
+// median and 17ms at their worst with *no* long tasks at all, inference cost
+// 6.4ms, and shutter-to-schedule was 8.2ms median and 9.3ms at p95. There is
+// no contention to relieve. A worker would buy nothing measurable and would
+// cost a Chromium-only capture path plus a fallback to keep working, in the
+// most fragile part of the app. Measure again before revisiting; the numbers
+// are what should decide it, not the fact that workers sound faster.
 
 import { BASE } from './base'
 import type { Observation, Sample } from './perception'
@@ -203,8 +213,11 @@ function readHand(lm: LM[]): Observation | null {
   px /= PALM.length; py /= PALM.length
 
   let sy = 0
+  let pz = 0
   for (const i of TIPS) sy += lm[i].y
   sy /= TIPS.length
+  for (const i of PALM) pz += lm[i].z ?? 0
+  pz /= PALM.length
 
   const palm = Math.hypot(lm[MIDDLE_MCP].x - lm[WRIST].x, lm[MIDDLE_MCP].y - lm[WRIST].y) || 1e-3
   const span = Math.hypot(lm[THUMB_TIP].x - lm[PINKY_TIP].x, lm[THUMB_TIP].y - lm[PINKY_TIP].y) / palm
@@ -213,6 +226,7 @@ function readHand(lm: LM[]): Observation | null {
     x: 1 - px,                                     // mirrored to match the backdrop
     y: py,
     sy,
+    z: pz,
     spread: Math.max(0, Math.min(1, (span - 0.7) / 1.1)),
     conf: 1,
   }

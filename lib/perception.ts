@@ -14,9 +14,20 @@ export type Observation = {
   x: number       // 0..1 palm centre across the frame
   y: number       // 0..1 palm centre, 0 = top
   sy: number      // 0..1 the point a keystroke actually moves (fingertips)
+  z: number       // depth, negative towards the camera, in hand-widths
   spread: number  // 0..1 thumb-to-pinky span, normalised by palm size
   conf: number
 }
+
+/**
+ * How much a press *towards the camera* counts as a keystroke alongside a
+ * drop. On a real piano the key stops your hand and the motion is purely
+ * down; in the air there is nothing to stop it, and people reach forward as
+ * much as they push down — especially the second or third time, once they
+ * have stopped miming and started playing. Reading only the vertical threw
+ * away half of what everybody was actually doing.
+ */
+const PRESS_DEPTH = 0.55
 
 export type Sample = {
   t: number          // seconds, our clock
@@ -123,7 +134,9 @@ export class Perception {
         this.prev[side] = { x: o.x, y: o.y, t: s.t }
 
         this.strokers[side].sensitivity = this.sensitivity
-        const hit = this.strokers[side].feed(s.t, o.sy, true, s.capturedAt)
+        // down and forward are the same gesture as far as the instrument cares
+        const press = o.sy - o.z * PRESS_DEPTH
+        const hit = this.strokers[side].feed(s.t, press, true, s.capturedAt)
         if (hit) strokes.push({ ...hit, x: o.x })
       } else {
         const gone = s.t - this.lastSeen[side] > GONE_AFTER
