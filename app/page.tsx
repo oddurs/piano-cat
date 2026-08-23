@@ -69,6 +69,8 @@ export default function Page() {
   /** things we have already shown you once; nobody needs telling twice */
   const seenRef = useRef<Set<string>>(new Set())
   const previewRef = useRef<{ con: Conductor; acc: number; side: Side } | null>(null)
+  /** how much of this performance had two hands far enough apart to be two people */
+  const duetRef = useRef({ frames: 0, both: 0 })
   const [listening, setListening] = useState(false)
   const overAtRef = useRef(0)
   const clappedRef = useRef(false)
@@ -117,7 +119,17 @@ export default function Page() {
     const fit = () => {
       const c = canvasRef.current
       if (!c) return
-      const s = Math.max(1, Math.floor(Math.min((window.innerWidth - 90) / W, (window.innerHeight - 190) / H)))
+      // Whole-number scaling keeps every pixel square, and on a desktop there
+      // is always room for it. On a phone the honest integer answer was 1,
+      // which put a 320-wide canvas on a 390-wide screen — so below that we
+      // take a fractional scale instead. The canvas is nearest-neighboured by
+      // CSS either way; uneven pixels beat a postage stamp.
+      const narrow = window.innerWidth < 760
+      const raw = Math.min(
+        (window.innerWidth - (narrow ? 16 : 90)) / W,
+        (window.innerHeight - (narrow ? 230 : 190)) / H,
+      )
+      const s = raw >= 2 ? Math.floor(raw) : Math.max(1, +raw.toFixed(3))
       c.style.width = `${W * s}px`
       c.style.height = `${H * s}px`
     }
@@ -238,6 +250,7 @@ export default function Page() {
     clappedRef.current = false
     overAtRef.current = 0
     seenRef.current.clear()
+    duetRef.current = { frames: 0, both: 0 }
     countRef.current = null
     replayRef.current = null
     probeRef.current.clear()
@@ -366,7 +379,11 @@ export default function Page() {
         drawLoading(ren.px, { t, status: statusRef.current, done: doneRef.current })
             } else if (scr === 'verdict') {
         const con = conRef.current!
-        drawVerdict(ren.px, { t, piece: con.piece, report: con.report, take: takeRef.current })
+        const d = duetRef.current
+        drawVerdict(ren.px, {
+          t, piece: con.piece, report: con.report, take: takeRef.current,
+          duet: d.frames > 0 && d.both / d.frames > 0.4,
+        })
       } else {
         const con = conRef.current!
         const f = frameRef.current
@@ -423,6 +440,12 @@ export default function Page() {
         }
         if (!replayRef.current) takeRecRef.current.sample(now, ex.dyn, ex.height, ex.spread)
         con.update(dt, now, ex)
+        // Two hands this far apart are not one person's. The app noticing is
+        // most of the joke, and the mechanics already supported it.
+        const duet = tracked && f.hands.L.present && f.hands.R.present
+          && f.hands.R.x - f.hands.L.x > 0.5
+        duetRef.current.frames += 1
+        if (duet) { duetRef.current.both += 1; teach('duet', 'A DUET - ONE HAND EACH') }
         if (con.pedal > 0.62) teach('pedal', 'DAMPERS UP - IT ALL RINGS')
         if (tracked && (con.engage.L < 0.1 || con.engage.R < 0.1)) teach('rest', 'THAT HAND IS RESTING')
         for (const n of con.drain()) ren.noteFired(n.p, n.vel, con.piece.accent, n.kind === 'ornament')
@@ -475,7 +498,7 @@ export default function Page() {
 
         ren.draw(con, f, dt, mood, {
           auto: autoRef.current,
-          vibe: rp ? 'REPLAY' : vibe,
+          vibe: rp ? 'REPLAY' : duet ? 'DUET' : vibe,
           hint: con.finished ? '' : hint,
           countIn: countRef.current?.left ?? null,
           over: con.finished,

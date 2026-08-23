@@ -170,7 +170,7 @@ export function drawLoading(px: Px, o: { t: number; status: string; done: number
  * part that makes you want to go again.
  */
 export function drawVerdict(px: Px, o: {
-  t: number; piece: Piece; report: Report; take: number
+  t: number; piece: Piece; report: Report; take: number; duet?: boolean
 }) {
   const { report: r, piece: p } = o
   drawBackdrop(px, o.t, p.accent)
@@ -200,7 +200,7 @@ export function drawVerdict(px: Px, o: {
     `${r.notes} NOTES`,
     `${r.strokes} STROKES`,
     `${Math.round(r.bpm)} BPM`,
-    `TAKE ${o.take}`,
+    o.duet ? 'AS A DUET' : `TAKE ${o.take}`,
   ]
   facts.forEach((f, i) => {
     const x = 40 + (i % 2) * 118
