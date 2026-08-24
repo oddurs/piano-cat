@@ -24,6 +24,7 @@ export function clip(seconds: number, players: Player[], fps = 30): Sample[] {
       t,
       capturedAt: t - 0.012,
       energy: 0.02,
+      watching: 'hands',
       hands: players.map((p) => {
         const y = p.period ? strikingY(t, p.period) : 0.5
         return { x: p.x, y, sy: y, z: 0, fingers: [y, y, y, y, y], spread: 0.5, conf: 1 }

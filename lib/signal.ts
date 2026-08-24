@@ -46,6 +46,9 @@ export type PlayFrame = {
   height: number     // 0..1 mean hand height, 1 = high -> pedal down
   spread: number     // 0..1 mean hand spread -> voicing width
   travel: number     // 0..1 how fast your hands are moving *right now*
+  /** ok: playing. partly: something hand-shaped, too little of it to trust.
+   *  none: nothing hand-shaped at all. */
+  framing: 'ok' | 'partly' | 'none'
   pixels: Uint8Array
   motionMask: Uint8Array
 }

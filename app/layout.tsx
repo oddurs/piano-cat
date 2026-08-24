@@ -1,11 +1,16 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
-const site = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://oddurs.github.io/piano-cat'
+// The origin only. Next resolves image paths against metadataBase *and*
+// prefixes them with basePath, so putting the base path in both produced
+// https://oddurs.github.io/piano-cat/piano-cat/opengraph-image.png
+const origin = process.env.NEXT_PUBLIC_SITE_ORIGIN ?? 'https://oddurs.github.io'
+const base = process.env.NEXT_PUBLIC_BASE_PATH ?? ''
+const site = `${origin}${base}/`
 const blurb = 'Mime a masterpiece at your webcam. Your hands are the hammers and the pedal; the cat has opinions.'
 
 export const metadata: Metadata = {
-  metadataBase: new URL(site),
+  metadataBase: new URL(origin),
   title: {
     default: 'Piano Cat',
     template: '%s · Piano Cat',

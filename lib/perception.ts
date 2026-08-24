@@ -36,11 +36,15 @@ export type Sample = {
   capturedAt: number // seconds, when the camera exposed this frame
   hands: Observation[]
   energy: number     // 0..1 whole-frame movement, for the fallback path
+  /** what the camera is capable of seeing. 'pixels' means no hand model. */
+  watching?: 'hands' | 'pixels'
 }
 
 const BLANK = new Uint8Array(1)
 /** a hand unseen for longer than this has left the instrument */
 const GONE_AFTER = 0.5
+/** below this we are looking at something and hoping it is a hand */
+const MIN_CONFIDENCE = 0.55
 /** the range a hand is assumed to move through before we know any better */
 const DEFAULT_TOP = 0.28
 const DEFAULT_BOTTOM = 0.7
@@ -101,7 +105,10 @@ export class Perception {
     // Hands are named by where they are, not by MediaPipe's anatomy call: the
     // hand on the left of your mirrored picture is the one over the bass, and
     // that is the only mapping that matches what you see on screen.
-    const seen = [...s.hands].sort((a, b) => a.x - b.x)
+    // Only hands we believe in. The rest are shown as ghosts so you can see
+    // what the camera is unsure about, but they do not play anything.
+    const believable = s.hands.filter((h) => h.conf >= MIN_CONFIDENCE)
+    const seen = [...believable].sort((a, b) => a.x - b.x)
     const assigned: Partial<Record<Side, Observation>> = {}
     if (seen.length >= 2) { assigned.L = seen[0]; assigned.R = seen[seen.length - 1] }
     else if (seen.length === 1) {
@@ -153,9 +160,13 @@ export class Perception {
       h.lastStroke = s.t - this.lastStroke[side]
     }
 
-    // No hands anywhere? Fall back to whole-frame motion, alternating sides so
-    // the two staves still both get played.
-    if (!this.hasAnyHand(s.t)) {
+    // Whole-frame motion is a last resort, not a safety net. It used to run
+    // whenever no hand was currently visible, which meant the instrument kept
+    // playing when you took your hands out of the picture, when the light
+    // changed, when somebody walked past behind you — anything that moved at
+    // all. If the camera can see hands, then hands are what it plays: no
+    // hands, no notes, and the screen says so.
+    if (s.watching !== 'hands' && !this.hasAnyHand(s.t)) {
       this.tracked = false
       this.energy.sensitivity = this.sensitivity
       const hit = this.energy.feed(s.t, dt, s.energy, this.fallbackSide)
@@ -175,6 +186,9 @@ export class Perception {
     this.expr.update(dt, this.hands, s.energy)
 
     const anyPresent = this.hands.L.present || this.hands.R.present
+    // what to say about the framing, if anything
+    const framing: PlayFrame['framing'] = anyPresent ? 'ok'
+      : s.hands.length ? 'partly' : 'none'
     const heights = SIDES.filter((x) => this.hands[x].present).map((x) => this.heightOf(this.hands[x].y))
     const height = heights.length ? heights.reduce((a, b) => a + b, 0) / heights.length : this.expr.height
 
@@ -189,6 +203,7 @@ export class Perception {
       height,
       spread: this.expr.spread,
       travel: this.expr.travel,
+      framing,
       pixels,
       motionMask: mask,
     }

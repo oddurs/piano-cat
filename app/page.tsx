@@ -563,7 +563,9 @@ export default function Page() {
         let hint = ''
         const cam = camRef.current
         if (!autoRef.current) {
-          if (cam?.mode === 'hands' && !f.tracked) hint = 'SHOW ME YOUR HANDS'
+          if (cam?.mode === 'hands' && !f.tracked) {
+            hint = f.framing === 'partly' ? 'BOTH HANDS IN THE PICTURE' : 'SHOW ME YOUR HANDS'
+          }
           else if (!sawFirstRef.current) hint = 'PLAY A KEY IN THE AIR'
           else if (asleep) hint = 'the cat is waiting'
         }
@@ -904,6 +906,7 @@ function idleFrame(): PlayFrame {
     strokes: [],
     tracked: false,
     energy: 0, dyn: 0, wild: 0, height: 0.5, spread: 0.5, travel: 0,
+    framing: 'none',
     pixels: BLANK, motionMask: BLANK,
   }
 }
