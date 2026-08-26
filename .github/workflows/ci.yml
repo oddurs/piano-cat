@@ -20,6 +20,9 @@ jobs:
   check:
     name: check
     runs-on: ubuntu-latest
+    # Every step here is seconds of work. Anything approaching this is hung,
+    # and a hung job holds the `pages` concurrency group against the next one.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -73,6 +76,7 @@ jobs:
     needs: check
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     concurrency:
       group: pages
       cancel-in-progress: false

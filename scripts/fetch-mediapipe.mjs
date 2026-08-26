@@ -59,15 +59,39 @@ async function model() {
     console.warn('mediapipe: model hash mismatch, refetching')
   }
   await mkdir(dirname(MODEL.path), { recursive: true })
-  const res = await fetch(MODEL.url)
-  if (!res.ok) throw new Error(`mediapipe: model fetch failed (${res.status})`)
-  const buf = Buffer.from(await res.arrayBuffer())
+  const buf = await download()
   const got = sha256(buf)
   if (got !== MODEL.sha256) {
     throw new Error(`mediapipe: model hash is ${got}, expected ${MODEL.sha256}`)
   }
   await writeFile(MODEL.path, buf)
   return true
+}
+
+/**
+ * This is the only thing the build fetches from the network, so a blip here
+ * fails `npm run dev` and every CI run. Retry the transient half of that —
+ * timeouts, resets, 5xx, 429 — and fail fast on the half that will not fix
+ * itself, like a 404 from the model being moved.
+ */
+async function download() {
+  const RETRIES = 4
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const res = await fetch(MODEL.url, { signal: AbortSignal.timeout(60_000) })
+      if (res.ok) return Buffer.from(await res.arrayBuffer())
+      const retryable = res.status === 429 || res.status >= 500
+      if (!retryable || attempt > RETRIES) {
+        throw new Error(`mediapipe: model fetch failed (${res.status})`)
+      }
+      console.warn(`mediapipe: fetch got ${res.status}, retrying`)
+    } catch (err) {
+      // A hash mismatch is not a network problem — never retry past it.
+      if (attempt > RETRIES || err.message.startsWith('mediapipe:')) throw err
+      console.warn(`mediapipe: fetch failed (${err.message}), retrying`)
+    }
+    await new Promise((r) => setTimeout(r, 500 * 2 ** (attempt - 1)))
+  }
 }
 
 const copied = await wasm()
