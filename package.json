@@ -30,7 +30,8 @@
   "scripts": {
     "prepare": "git config core.hooksPath .githooks || true",
     "predev": "node scripts/fetch-mediapipe.mjs",
-    "dev": "next dev -p 9393",
+    "dev": "node tools/serve.mjs",
+    "dev:raw": "next dev -p 9393",
     "prebuild": "node scripts/fetch-mediapipe.mjs",
     "build": "next build",
     "preview": "npx --yes serve out -l 9393",

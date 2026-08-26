@@ -73,6 +73,11 @@ npm install
 npm run dev          # http://localhost:9393
 ```
 
+`dev` runs under a supervisor: it restarts `next dev` if it dies, and reclaims
+port 9393 from a stray server of its own (never from anything else — it names
+what is holding the port and steps aside). `PORT=9394 npm run dev` moves it;
+`npm run dev:raw` skips the supervisor entirely.
+
 The camera needs a secure context — `localhost` counts, so dev works. No
 camera? `SPACE` is a keystroke and everything else still works.
 
