@@ -1,0 +1,71 @@
+name: Bug report
+description: Something is broken, or the instrument doesn't respond the way it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. If this is about the *feel* — gestures being
+        eaten, tempo bolting, notes clumping — that counts as a bug and is
+        exactly the kind worth reporting.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: And what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: |
+        Which piece, and what were you doing with your hands? If it only
+        happens sometimes, say roughly how often.
+      placeholder: |
+        1. Pick Moonlight Sonata
+        2. Play steadily for about 20 seconds
+        3. …
+    validations:
+      required: true
+
+  - type: input
+    id: where
+    attributes:
+      label: Where
+      description: The deployed site, or a local dev server?
+      placeholder: oddurs.github.io/piano-cat
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and OS
+      placeholder: Chrome 141 on macOS 15
+    validations:
+      required: true
+
+  - type: dropdown
+    id: input
+    attributes:
+      label: How were you playing?
+      options:
+        - Webcam (hand tracking)
+        - Webcam, but it fell back to the pixel grid
+        - Keyboard only (SPACE / Z / X)
+        - Autopilot
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: clip
+    attributes:
+      label: Clip
+      description: |
+        Optional, and the single most useful thing you can attach for anything
+        camera-related: press `D` then `C` while playing to download a JSON
+        clip of what the camera saw. It contains landmark numbers, no imagery.
