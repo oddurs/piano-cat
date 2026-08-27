@@ -18,11 +18,12 @@ about the visuals.** Pixel art cannot be reviewed by reasoning about it; the
 first run of that harness caught a bow tie rendering on the cat's face, hidden
 paws, and a tail that read as a stray arm.
 
-**Touch `lib/conductor.ts` or `lib/pieces.ts` → run `npm test`.** It asserts the
+**Touch `lib/conductor.ts`, `lib/onset.ts`, `lib/gesture.ts`, `lib/hand.ts` or
+`lib/pieces.ts` → run `npm test`.** It asserts the
 properties that make the toy feel smooth rather than jerky, and it has already
 caught a real bar-alignment bug in Für Elise.
 
-The camera path (`lib/motion.ts`) genuinely cannot be verified here. Its
+The camera path (`lib/camera.ts`) genuinely cannot be verified here. Its
 thresholds are inference. Say so rather than implying otherwise, and keep the
 escape hatches working: the sensitivity slider, `AUTO`, and `SPACE` as a manual
 keystroke.
@@ -32,8 +33,12 @@ keystroke.
 - **The canvas is 320×180**, integer-scaled with nearest-neighbour. Every
   coordinate snaps to a whole pixel — a half pixel is a visible smear. Draw
   through `lib/px.ts`, never with arbitrary float rects.
-- **No runtime dependencies beyond React/Next.** No CDN, no audio library, no
-  ML model. The piano samples are vendored deliberately.
+- **No runtime dependencies beyond React/Next and the hand landmarker.** No
+  CDN, no audio library. The piano samples are vendored deliberately, and the
+  model is self-hosted deliberately — it is fetched at build time and checked
+  against a pinned hash by `scripts/fetch-mediapipe.mjs`, so what reads
+  somebody's camera never comes from a third party at runtime. The `pixels`
+  fallback must keep working for machines that cannot carry the model.
 - **Anything fetched by hand must go through `lib/base.ts`.** On Pages the site
   lives under `/piano-cat/`, so a bare `/piano/A4.mp3` 404s.
 - **Strikes are beat markers, not note triggers.** If you find yourself
@@ -42,9 +47,13 @@ keystroke.
 - **Animation is locked to musical phase, not the wall clock.** The cat bobbing
   on a free-running sine drifts out of time with its own playing and looks
   broken.
-- The scores in `lib/pieces.ts` are hand-transcribed and abridged. They are not
-  urtext and the README says so; keep it that way rather than implying accuracy
-  that isn't there.
+- The scores in `lib/scores/` are **generated** from published digital editions
+  by `tools/import-kern.mjs` and `tools/import-midi.mjs` — never edited by hand,
+  never typed from memory. Each file records the command that produced it, so
+  regenerate rather than patch. Credit every edition in `lib/scores/SOURCES.md`,
+  and keep the provenance accurate in both directions: don't claim urtext, and
+  don't describe generated data as hand-transcribed. Chopsticks is the one
+  exception and is labelled an arrangement.
 
 ## Git workflow
 
@@ -87,6 +96,7 @@ per-worktree, so nothing leaks between them.
 
 ## Deploying
 
-Push to `main`. `.github/workflows/deploy.yml` typechecks, tests, builds a
-static export with `NEXT_PUBLIC_BASE_PATH=/<repo>`, and publishes to Pages.
-Never commit `out/`.
+Push to `main`. `.github/workflows/ci.yml` typechecks, tests, builds a static
+export with `NEXT_PUBLIC_BASE_PATH=/<repo>`, and publishes to Pages — the same
+workflow that gates PRs, so nothing deploys that didn't pass. Never commit
+`out/`.
